@@ -1,12 +1,27 @@
 version: "3.8"
 
 services:
-
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   brain:
     build: .
     container_name: brain_bot
     restart: always
+    depends_on:
+      - ollama
     env_file:
       - .env
     environment:

@@ -25,15 +25,14 @@ birth_date = "2009-01-24"         # ← Дата рождения (24 январ
 
 # ── AI ───────────────────────────────────────────────────────
 [ai]
-provider = "openai"
+provider = "ollama"
 temperature = 0.3
 max_tokens = 512
 
-[ai.openai]
-base_url = "https://openrouter.ai/api"
-api_key = "YOUR_API_KEY_HERE"
-model = "google/gemma-2-9b-it"
-heavy_model = "meta-llama/llama-3.1-70b-instruct"
+[ai.ollama]
+base_url = "http://ollama:11434"
+model = "gpt-oss:20b"
+heavy_model = "gpt-oss:120b"
 embedding_model = "nomic-embed-text"
 
 # ── Планировщик ──────────────────────────────────────────────
