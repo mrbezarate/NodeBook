@@ -1,0 +1,12 @@
+[package]
+name = "brain-classifier"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+brain-common = { workspace = true }
+brain-parser = { workspace = true }
+brain-core = { workspace = true }
+brain-ai = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }

@@ -1,0 +1,34 @@
+version: "3.8"
+
+services:
+  ai-runner:
+    build:
+      context: ./apps/ai-runner
+    ports:
+      - "8000:8000"
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  brain:
+    build: .
+    container_name: brain_bot
+    restart: always
+    depends_on:
+      - ai-runner
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Yekaterinburg
+    volumes:
+      - ./base:/app/base
+      - ./config.toml:/app/config.toml:ro
+      - ./logs:/app/logs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

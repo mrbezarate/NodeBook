@@ -1,0 +1,15 @@
+[package]
+name = "brain-embeddings"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+brain-common = { workspace = true }
+brain-core = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }

@@ -1,0 +1,13 @@
+[package]
+name = "brain-scheduler"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+brain-common = { workspace = true }
+tokio = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }

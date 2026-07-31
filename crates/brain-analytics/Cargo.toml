@@ -1,0 +1,10 @@
+[package]
+name = "brain-analytics"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+brain-common = { workspace = true }
+serde = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }

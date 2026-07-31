@@ -1,0 +1,14 @@
+[package]
+name = "brain-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+brain-common = { workspace = true }
+brain-config = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+chrono = { workspace = true }

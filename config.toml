@@ -1,0 +1,46 @@
+# ── Telegram ─────────────────────────────────────────────────
+[telegram]
+# bot_token берётся из .env (BOT_TOKEN)
+# allowed_users = []  # пустой = доступ для всех
+
+# ── Vault (Obsidian) ─────────────────────────────────────────
+[vault]
+path = "/app/base"
+daily_folder = "001 Daily"
+templates_folder = "Templates"
+
+[vault.para]
+projects = "001 Project"
+areas = "002 Areas"
+resources = "003 Resources"
+archive = "004 Archives"
+inbox = "000 Inbox"
+
+# ── Дневник ──────────────────────────────────────────────────
+[diary]
+evening_review_time = "22:00"
+timezone = "Asia/Yekaterinburg"
+city = "Yekaterinburg"            # ← для погоды (wttr.in)
+life_expectancy_years = 80
+birth_date = "2005-04-15"         # ← Замени на свою дату рождения
+
+# ── AI ───────────────────────────────────────────────────────
+[ai]
+provider = "ollama"
+temperature = 0.3
+max_tokens = 512
+
+[ai.ollama]
+base_url = "http://ai-runner:8000"
+model = "google/gemma-4-E2B-it"
+heavy_model = "google/gemma-4-E4B-it"
+embedding_model = "all-MiniLM-L6-v2"
+
+# ── Планировщик ──────────────────────────────────────────────
+[scheduler]
+check_interval_seconds = 60
+max_reminders_per_day = 20
+
+# ── Логирование ──────────────────────────────────────────────
+[logging]
+level = "info"

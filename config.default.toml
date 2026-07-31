@@ -1,0 +1,79 @@
+# ╔══════════════════════════════════════════════════════════════╗
+# ║                    BRAIN — Configuration                    ║
+# ╚══════════════════════════════════════════════════════════════╝
+#
+# Скопируйте этот файл как config.toml и заполните ваши значения.
+# Все пути могут быть абсолютными или относительными.
+
+# ── Telegram ──────────────────────────────────────────────────
+[telegram]
+bot_token = ""                          # @BotFather token
+allowed_users = []                      # Telegram user IDs (числа)
+
+# ── Obsidian Vault ────────────────────────────────────────────
+[vault]
+path = "~/Obsidian/Brain"               # Путь к Obsidian vault
+daily_folder = "Daily"                  # Папка для дневника
+templates_folder = "Templates"          # Папка шаблонов
+
+# PARA-структура
+[vault.para]
+projects = "Projects"
+areas = "Areas"
+resources = "Resources"
+archive = "Archive"
+inbox = "Inbox"                         # Входящие до классификации
+
+# ── AI Provider ───────────────────────────────────────────────
+[ai]
+provider = "ollama"                     # "ollama" | "openai" | "none"
+temperature = 0.3                       # Низкая для точной классификации
+max_tokens = 512
+
+[ai.ollama]
+base_url = "http://localhost:11434"
+model = "phi3:mini"                     # Маленькая быстрая модель
+embedding_model = "nomic-embed-text"    # Модель для embeddings
+
+[ai.openai]
+api_key = ""
+model = "gpt-4o-mini"
+base_url = "https://api.openai.com/v1"
+
+# ── Embeddings ────────────────────────────────────────────────
+[embeddings]
+enabled = true
+dimension = 768                         # Размерность вектора
+similarity_threshold = 0.75            # Порог для связывания заметок
+storage = "memory"                      # "memory" | "sqlite"
+
+# ── Classifier ────────────────────────────────────────────────
+[classifier]
+# Приоритет: rules → ai → fallback
+strategy = "hybrid"                     # "rules" | "ai" | "hybrid"
+confidence_threshold = 0.7             # Минимальная уверенность
+fallback_type = "thought"              # Тип по умолчанию если ничего не подошло
+fallback_area = "Life"                 # Область по умолчанию
+
+# ── Diary ─────────────────────────────────────────────────────
+[diary]
+evening_review_time = "21:00"          # Время вечернего обзора
+timezone = "Asia/Yekaterinburg"        # Часовой пояс
+life_expectancy_years = 80             # Для статистики "прожито/осталось"
+birth_date = "2000-01-01"              # Дата рождения
+
+# ── Analytics ─────────────────────────────────────────────────
+[analytics]
+min_data_points = 7                    # Минимум точек для анализа трендов
+trend_window_days = 14                 # Окно для определения трендов
+insight_generation = true              # Генерировать инсайты автоматически
+
+# ── Scheduler ─────────────────────────────────────────────────
+[scheduler]
+check_interval_seconds = 60            # Интервал проверки напоминаний
+max_reminders_per_day = 20             # Лимит напоминаний в день
+
+# ── Logging ───────────────────────────────────────────────────
+[logging]
+level = "info"                         # "trace" | "debug" | "info" | "warn" | "error"
+file = "logs/brain.log"               # Файл лога (пустая строка = только stdout)

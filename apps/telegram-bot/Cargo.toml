@@ -1,0 +1,24 @@
+[package]
+name = "brain-telegram-bot"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+brain-common = { workspace = true }
+brain-config = { workspace = true }
+brain-core = { workspace = true }
+brain-diary = { workspace = true }
+brain-classifier = { workspace = true }
+brain-vault = { workspace = true }
+brain-ai = { workspace = true }
+async-trait = "0.1"
+
+teloxide = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+dotenvy = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }

@@ -1,0 +1,88 @@
+[workspace]
+resolver = "2"
+
+members = [
+    # ── Applications ──────────────────────────────────────
+    "apps/telegram-bot",
+
+    # ── Core Crates ───────────────────────────────────────
+    "crates/brain-common",
+    "crates/brain-config",
+    "crates/brain-core",
+
+    # ── Processing Pipeline ───────────────────────────────
+    "crates/brain-parser",
+    "crates/brain-classifier",
+    "crates/brain-ai",
+    "crates/brain-embeddings",
+
+    # ── Storage & Knowledge ───────────────────────────────
+    "crates/brain-vault",
+    "crates/brain-graph",
+
+    # ── Features ──────────────────────────────────────────
+    "crates/brain-diary",
+    "crates/brain-scheduler",
+    "crates/brain-analytics",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["mrbez"]
+license = "MIT"
+repository = "https://github.com/mrbez/brain"
+
+[workspace.dependencies]
+# ── Async Runtime ─────────────────────────────────────
+tokio = { version = "1", features = ["full"] }
+
+# ── Telegram ──────────────────────────────────────────
+teloxide = { version = "0.13", features = ["macros"] }
+
+# ── Serialization ─────────────────────────────────────
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+toml = "0.8"
+
+# ── HTTP Client ───────────────────────────────────────
+reqwest = { version = "0.12", features = ["json"] }
+
+# ── Error Handling ────────────────────────────────────
+thiserror = "2"
+anyhow = "1"
+
+# ── Logging ───────────────────────────────────────────
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# ── Date/Time ─────────────────────────────────────────
+chrono = { version = "0.4", features = ["serde"] }
+
+# ── Regex ─────────────────────────────────────────────
+regex = "1"
+dotenvy = "0.15"
+
+# ── UUID ──────────────────────────────────────────────
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# ── File Watching ─────────────────────────────────────
+notify = "7"
+
+# ── Async Trait ───────────────────────────────────────
+async-trait = "0.1"
+
+# ── Internal Crates ───────────────────────────────────
+brain-common = { path = "crates/brain-common" }
+brain-config = { path = "crates/brain-config" }
+brain-core = { path = "crates/brain-core" }
+brain-parser = { path = "crates/brain-parser" }
+brain-classifier = { path = "crates/brain-classifier" }
+brain-ai = { path = "crates/brain-ai" }
+brain-embeddings = { path = "crates/brain-embeddings" }
+brain-vault = { path = "crates/brain-vault" }
+brain-graph = { path = "crates/brain-graph" }
+brain-diary = { path = "crates/brain-diary" }
+brain-scheduler = { path = "crates/brain-scheduler" }
+brain-analytics = { path = "crates/brain-analytics" }

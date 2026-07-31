@@ -1,0 +1,9 @@
+[package]
+name = "brain-parser"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+brain-common = { workspace = true }
+regex = { workspace = true }
+tracing = { workspace = true }
