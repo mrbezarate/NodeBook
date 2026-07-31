@@ -82,11 +82,12 @@ pub async fn handle_message(
             // Default: ingest as a raw event
             let source = EntrySource::Telegram { user_id, message_id: msg.id.0 };
             match engine.ingest_raw_event(text, source).await {
-                Ok(event_id) => {
-                    let response = format!("✅ <b>Событие принято в очередь.</b>\nID: {}", event_id);
-                    bot.send_message(chat_id, response)
-                        .parse_mode(teloxide::types::ParseMode::Html)
-                        .await?;
+                Ok(_event_id) => {
+                    bot.send_message(chat_id,
+                        "⏳ <b>Анализирую и классифицирую...</b>\n<i>Мысль сохранена, обрабатываю в фоне →</i> Obsidian"
+                    )
+                    .parse_mode(teloxide::types::ParseMode::Html)
+                    .await?;
                 }
                 Err(e) => {
                     bot.send_message(chat_id, format!("❌ Ошибка: {}", e)).await?;

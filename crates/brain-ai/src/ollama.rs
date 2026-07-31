@@ -23,7 +23,11 @@ struct GenerateRequest<'a> {
 }
 
 #[derive(Deserialize)]
-struct GenerateResponse { response: String }
+struct GenerateResponse { 
+    response: String,
+    #[serde(default)]
+    thinking: Option<String>,
+}
 
 #[derive(Serialize)]
 struct EmbedRequest<'a> { model: &'a str, input: &'a str }
@@ -34,7 +38,7 @@ struct EmbedResponse { embeddings: Vec<Vec<f32>> }
 impl OllamaProvider {
     pub fn new(base_url: impl Into<String>, model: impl Into<String>, embedding_model: impl Into<String>) -> Self {
         Self {
-            client: reqwest::Client::builder().timeout(Duration::from_secs(30)).build().unwrap(),
+            client: reqwest::Client::builder().timeout(Duration::from_secs(120)).build().unwrap(),
             base_url: base_url.into(),
             model: model.into(),
             embedding_model: embedding_model.into(),

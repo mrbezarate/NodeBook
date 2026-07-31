@@ -4,6 +4,7 @@ use tracing_subscriber::EnvFilter;
 
 mod handlers;
 mod keyboard;
+mod output_sink;
 mod state;
 
 use brain_common::{Classification, EntryType, Result};
@@ -141,6 +142,9 @@ async fn main() -> anyhow::Result<()> {
     let vault_store = Arc::new(brain_vault::EntityVault::new(config.vault.path.clone()));
     let knowledge_store = Arc::new(brain_core::db::SqliteKnowledgeStore::new("brain.db")?);
 
+    // Bot must be created early so OutputSink can use it
+    let bot = teloxide::Bot::new(&config.telegram.bot_token);
+
     // Agentic Pipeline
     let pipeline = Arc::new(brain_core::agentic_pipeline::AgenticPipeline::new(
         heavy_ai_provider.clone(),
@@ -154,6 +158,17 @@ async fn main() -> anyhow::Result<()> {
         knowledge_store.clone(),
         heavy_ai_provider.clone(),
     ));
+
+    // OutputSink: отправляет результат обратно в Telegram пользователю
+    let owner_chat_id = config.telegram.allowed_users
+        .first()
+        .copied()
+        .unwrap_or(0);
+    let telegram_sink = output_sink::TelegramOutputSink::new(
+        bot.clone(),
+        teloxide::types::ChatId(owner_chat_id as i64),
+    );
+
     let consolidator = Arc::new(brain_core::consolidator::Consolidator::new(
         heavy_ai_provider.clone(),
         knowledge_store.clone(),
@@ -161,7 +176,7 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(brain_core::projection::SimpleProjectionEngine::new(knowledge_store.clone())),
         knowledge_store.clone(),
         Arc::new(brain_core::projection::ObsidianRenderer { base_path: config.vault.path.clone().into() }),
-        None,
+        Some(telegram_sink),
     ));
 
     let analytics_engine = Arc::new(brain_analytics::engine::LifeAnalyticsEngine::new(
@@ -186,8 +201,6 @@ async fn main() -> anyhow::Result<()> {
     let state_manager = Arc::new(StateManager::new());
 
     tracing::info!("🧠 Brain bot initialized");
-    
-    let bot = teloxide::Bot::new(&config.telegram.bot_token);
     
     // Register native commands menu in Telegram UI
     let commands = vec![

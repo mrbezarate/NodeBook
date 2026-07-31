@@ -31,8 +31,8 @@ max_tokens = 512
 
 [ai.ollama]
 base_url = "http://ollama:11434"
-model = "gpt-oss:20b"
-heavy_model = "gpt-oss:120b"
+model = "gpt-oss:20b-cloud"
+heavy_model = "gpt-oss:120b-cloud"
 embedding_model = "nomic-embed-text"
 
 # ── Планировщик ──────────────────────────────────────────────
