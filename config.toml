@@ -1,7 +1,6 @@
 # ── Telegram ─────────────────────────────────────────────────
 [telegram]
-# bot_token берётся из .env (BOT_TOKEN)
-# allowed_users = []  # пустой = доступ для всех
+allowed_users = [5887915765]  # Жесткое ограничение: доступ ТОЛЬКО для владельца (ID: 5887915765)
 
 # ── Vault (Obsidian) ─────────────────────────────────────────
 [vault]
@@ -19,10 +18,10 @@ inbox = "000 Inbox"
 # ── Дневник ──────────────────────────────────────────────────
 [diary]
 evening_review_time = "22:00"
-timezone = "Asia/Yekaterinburg"
-city = "Yekaterinburg"            # ← для погоды (wttr.in)
+timezone = "Asia/Almaty"
+city = "Taldykorgan"           # ← Талдыкорган для погоды (wttr.in)
 life_expectancy_years = 80
-birth_date = "2005-04-15"         # ← Замени на свою дату рождения
+birth_date = "2009-01-24"         # ← Дата рождения (24 января 2009)
 
 # ── AI ───────────────────────────────────────────────────────
 [ai]

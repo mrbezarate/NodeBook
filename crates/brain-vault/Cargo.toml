@@ -16,3 +16,4 @@ regex = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 walkdir = "2"
+brain-indexer = { workspace = true }

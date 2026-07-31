@@ -16,11 +16,9 @@ pub fn yes_no_keyboard(prefix: &str) -> InlineKeyboardMarkup {
     ]])
 }
 
-/// Действия с записью.
-pub fn entry_actions_keyboard(entry_id: &str) -> InlineKeyboardMarkup {
+/// Действия с сохранённой записью.
+pub fn entry_actions_keyboard(file_path: &str) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
-        InlineKeyboardButton::callback("✏️ Тип", format!("edit_type:{entry_id}")),
-        InlineKeyboardButton::callback("📁 Область", format!("edit_area:{entry_id}")),
-        InlineKeyboardButton::callback("✅ OK", format!("confirm:{entry_id}")),
+        InlineKeyboardButton::callback("📁 Путь к файлу", format!("path:{file_path}")),
     ]])
 }

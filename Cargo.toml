@@ -23,7 +23,7 @@ members = [
     # ── Features ──────────────────────────────────────────
     "crates/brain-diary",
     "crates/brain-scheduler",
-    "crates/brain-analytics",
+    "crates/brain-analytics", "crates/brain-indexer", "crates/brain-retrieval", "crates/brain-events", "crates/brain-memory", "crates/brain-reasoner",
 ]
 
 [workspace.package]
@@ -86,3 +86,8 @@ brain-graph = { path = "crates/brain-graph" }
 brain-diary = { path = "crates/brain-diary" }
 brain-scheduler = { path = "crates/brain-scheduler" }
 brain-analytics = { path = "crates/brain-analytics" }
+brain-indexer = { path = "crates/brain-indexer" }
+brain-retrieval = { path = "crates/brain-retrieval" }
+brain-events = { path = "crates/brain-events" }
+brain-memory = { path = "crates/brain-memory" }
+brain-reasoner = { path = "crates/brain-reasoner" }

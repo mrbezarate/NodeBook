@@ -1,0 +1,12 @@
+[package]
+name = "brain-indexer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+tantivy = "0.26.1"
+tracing = { workspace = true }
+tokio = { workspace = true }
+brain-common = { path = "../brain-common" }

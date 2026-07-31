@@ -14,44 +14,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use crate::state::StateManager;
 
-struct AiTagGenerator { ai: Arc<dyn AiProvider> }
-#[async_trait]
-impl TagGenerator for AiTagGenerator {
-    async fn generate_tags(&self, text: &str, classification: &Classification) -> Result<Vec<String>> {
-        let prompt = format!("Extract 3-5 relevant hashtags from this text. Output ONLY words with #. Text: {}", text);
-        if let Ok(response) = self.ai.complete(&prompt).await {
-            let tags: Vec<String> = response.split_whitespace().filter(|s| s.starts_with('#')).map(|s| s.replace('#', "")).collect();
-            if !tags.is_empty() { return Ok(tags); }
-        }
-        Ok(vec![format!("{:?}", classification.entry_type).to_lowercase()])
-    }
-}
-
-struct AiTitleGenerator { ai: Arc<dyn AiProvider> }
-#[async_trait]
-impl TitleGenerator for AiTitleGenerator {
-    async fn generate_title(&self, text: &str, entry_type: &EntryType) -> Result<String> {
-        let prompt = format!("Create a short title (max 5 words) for this text. Output ONLY the title. Text: {}", text);
-        if let Ok(response) = self.ai.complete(&prompt).await {
-            let title = response.trim().replace('"', "");
-            if !title.is_empty() { return Ok(title); }
-        }
-        Ok(format!("{:?} - {}", entry_type, text.split_whitespace().take(5).collect::<Vec<_>>().join(" ")))
-    }
-}
-
-struct AiLinkSuggester { ai: Arc<dyn AiProvider> }
-#[async_trait]
-impl LinkSuggester for AiLinkSuggester {
-    async fn suggest_links(&self, text: &str, _limit: usize) -> Result<Vec<String>> {
-        let prompt = format!("Extract 1-3 key concepts from this text. Output them as [[Concept]]. Text: {}", text);
-        if let Ok(response) = self.ai.complete(&prompt).await {
-            let links: Vec<String> = response.split_whitespace().filter(|s| s.starts_with("[[") && s.ends_with("]]")).map(|s| s.to_string()).collect();
-            return Ok(links);
-        }
-        Ok(vec![])
-    }
-}
+// Old generators removed: AiTagGenerator, AiTitleGenerator, AiLinkSuggester are now inside AgenticPipeline
 
 /// Background task: schedule evening diary at configured time.
 async fn evening_scheduler(
@@ -121,11 +84,13 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Initialize AI providers
-    let ai_provider = Arc::new(brain_ai::ollama::OllamaProvider::new(
+    let ollama_provider = Arc::new(brain_ai::ollama::OllamaProvider::new(
         config.ai.ollama.base_url.clone(),
         config.ai.ollama.model.clone(),
         config.ai.ollama.embedding_model.clone(),
-    )) as Arc<dyn brain_core::traits::AiProvider>;
+    ));
+    let ai_provider = ollama_provider.clone() as Arc<dyn brain_core::traits::AiProvider>;
+    let embeddings = ollama_provider.clone() as Arc<dyn brain_core::traits::EmbeddingProvider>;
 
     let heavy_ai_provider = Arc::new(brain_ai::ollama::OllamaProvider::new(
         config.ai.ollama.base_url.clone(),
@@ -133,31 +98,74 @@ async fn main() -> anyhow::Result<()> {
         config.ai.ollama.embedding_model.clone(),
     )) as Arc<dyn brain_core::traits::AiProvider>;
 
-    // Initialize pipeline components
-    let type_classifier = Arc::new(brain_classifier::HybridTypeClassifier::new(Some(ai_provider.clone()), config.classifier.confidence_threshold));
-    let area_detector = Arc::new(brain_classifier::HybridAreaDetector::new(Some(ai_provider.clone())));
+    // Initialize base components
     let entity_extractor = Arc::new(brain_classifier::HybridEntityExtractor::new());
-    let tag_generator = Arc::new(AiTagGenerator { ai: heavy_ai_provider.clone() });
-    let para_router = Arc::new(brain_vault::VaultParaRouter::new(config.vault.para.clone(), config.vault.path.clone()));
-    let title_generator = Arc::new(AiTitleGenerator { ai: heavy_ai_provider.clone() });
-    let link_suggester = Arc::new(AiLinkSuggester { ai: heavy_ai_provider.clone() });
-
-    let pipeline = PipelineBuilder::new()
-        .type_classifier(type_classifier)
-        .area_detector(area_detector)
-        .entity_extractor(entity_extractor)
-        .tag_generator(tag_generator)
-        .para_router(para_router)
-        .title_generator(title_generator)
-        .link_suggester(link_suggester)
-        .build()?;
-
     let vault = Arc::new(brain_vault::ObsidianVault::new(config.vault.path.clone(), config.vault.para.clone()));
+    
+    let vector_path = std::path::PathBuf::from(&config.vault.path).join(".brain_vectors.json");
+    let vector_store = Arc::new(brain_retrieval::VectorStore::load(vector_path).await?);
+    
+    let event_log_path = std::path::PathBuf::from(&config.vault.path).join(".brain_events.jsonl");
+    let event_logger = brain_events::JsonlEventLogger::new(event_log_path.clone()).await?;
+    let event_bus: Arc<dyn brain_events::EventBus> = Arc::new(event_logger);
+    
+    let context_manager: Arc<dyn brain_core::traits::ContextManager> = Arc::new(brain_memory::BrainMemory::new(
+        embeddings.clone(),
+        vector_store.clone(),
+        vault.clone(),
+    ));
+
+    let semantic_validator = Arc::new(brain_reasoner::SemanticEntityValidator::new(
+        embeddings.clone(),
+        vector_store.clone(),
+        0.90, // Similarity threshold for merging entities
+    ));
+
+    let entity_validator: Arc<dyn brain_core::traits::EntityValidator> = semantic_validator.clone();
+    let identity_resolver: Arc<dyn brain_core::traits::IdentityResolver> = semantic_validator.clone();
+    
+    let vault_store = Arc::new(brain_vault::EntityVault::new(config.vault.path.clone()));
+    let knowledge_store = Arc::new(brain_core::db::SqliteKnowledgeStore::new("brain.db")?);
+
+    // Agentic Pipeline
+    let pipeline = Arc::new(brain_core::agentic_pipeline::AgenticPipeline::new(
+        heavy_ai_provider.clone(),
+        entity_extractor,
+        vector_store.clone(),
+        Some(context_manager.clone()),
+    ));
+    
+    // Consolidator
+    let identity_resolver = Arc::new(brain_core::identity::CascadedIdentityResolver::new(
+        knowledge_store.clone(),
+        heavy_ai_provider.clone(),
+    ));
+    let consolidator = Arc::new(brain_core::consolidator::Consolidator::new(
+        heavy_ai_provider.clone(),
+        knowledge_store.clone(),
+        identity_resolver.clone(),
+        Arc::new(brain_core::projection::SimpleProjectionEngine::new(knowledge_store.clone())),
+        knowledge_store.clone(),
+        Arc::new(brain_core::projection::ObsidianRenderer { base_path: config.vault.path.clone().into() }),
+        None,
+    ));
+
+    let analytics_engine = Arc::new(brain_analytics::engine::LifeAnalyticsEngine::new(
+        heavy_ai_provider.clone(),
+        event_log_path,
+    ));
     
     let engine = BrainEngineBuilder::new()
         .config(config.clone())
         .pipeline(pipeline)
         .vault(vault)
+        .vector_store(vector_store)
+        .event_bus(event_bus)
+        .context_manager(context_manager)
+        .entity_validator(entity_validator)
+        .identity_resolver(identity_resolver)
+        .with_knowledge_store(vault_store)
+        .with_raw_event_store(knowledge_store)
         .build()?;
 
     let engine = Arc::new(engine);
@@ -167,6 +175,19 @@ async fn main() -> anyhow::Result<()> {
     
     let bot = teloxide::Bot::new(&config.telegram.bot_token);
     
+    // Register native commands menu in Telegram UI
+    let commands = vec![
+        teloxide::types::BotCommand::new("start", "🚀 Главное меню"),
+        teloxide::types::BotCommand::new("diary", "📖 Вечерний обзор дня"),
+        teloxide::types::BotCommand::new("search", "🔍 Поиск по базе знаний"),
+        teloxide::types::BotCommand::new("today", "📅 Заметка за сегодня"),
+        teloxide::types::BotCommand::new("stats", "📊 Статистика знаний"),
+        teloxide::types::BotCommand::new("help", "ℹ️ Справка и возможности"),
+    ];
+    if let Err(e) = bot.set_my_commands(commands).await {
+        tracing::warn!("Failed to set bot commands menu: {}", e);
+    }
+
     // Spawn evening scheduler
     {
         let bot_clone = bot.clone();
@@ -177,18 +198,34 @@ async fn main() -> anyhow::Result<()> {
             evening_scheduler(bot_clone, config_clone, engine_clone, sm_clone).await;
         });
     }
+
+    // Spawn Consolidator background worker
+    {
+        let cons = consolidator.clone();
+        tokio::spawn(async move {
+            tracing::info!("Starting Consolidator background worker");
+            loop {
+                if let Err(e) = cons.run_pending_job().await {
+                    tracing::error!("Consolidator worker error: {}", e);
+                }
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            }
+        });
+    }
     
     // Build handler tree with message + callback branches
     use teloxide::prelude::*;
     
     let engine_msg = engine.clone();
     let sm_msg = state_manager.clone();
+    let ae_msg = analytics_engine.clone();
     let message_handler = Update::filter_message().endpoint(
         move |bot: teloxide::Bot, msg: teloxide::types::Message| {
             let engine = engine_msg.clone();
             let sm = sm_msg.clone();
+            let ae = ae_msg.clone();
             async move {
-                if let Err(e) = handlers::message::handle_message(bot, msg, engine, sm).await {
+                if let Err(e) = handlers::message::handle_message(bot, msg, engine, sm, ae).await {
                     tracing::error!("Message handler error: {}", e);
                 }
                 Ok::<(), std::convert::Infallible>(())
@@ -198,12 +235,14 @@ async fn main() -> anyhow::Result<()> {
     
     let engine_cb = engine.clone();
     let sm_cb = state_manager.clone();
+    let ae_cb = analytics_engine.clone();
     let callback_handler = Update::filter_callback_query().endpoint(
         move |bot: teloxide::Bot, query: teloxide::types::CallbackQuery| {
             let engine = engine_cb.clone();
             let sm = sm_cb.clone();
+            let ae = ae_cb.clone();
             async move {
-                if let Err(e) = handlers::callback::handle_callback(bot, query, engine, sm).await {
+                if let Err(e) = handlers::callback::handle_callback(bot, query, engine, sm, ae).await {
                     tracing::error!("Callback handler error: {}", e);
                 }
                 Ok::<(), std::convert::Infallible>(())

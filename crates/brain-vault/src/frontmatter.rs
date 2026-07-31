@@ -12,7 +12,7 @@ pub struct Frontmatter {
     pub modified: String,
     pub id: String,
     #[serde(default)]
-    pub links: Vec<String>,
+    pub links: Vec<brain_common::SemanticLink>,
     #[serde(default)]
     pub source: String,
 }

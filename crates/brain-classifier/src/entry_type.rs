@@ -18,7 +18,7 @@ impl HybridTypeClassifier {
 
 #[async_trait]
 impl TypeClassifier for HybridTypeClassifier {
-    async fn classify_type(&self, text: &str) -> Result<(EntryType, f32)> {
+    async fn classify_type(&self, text: &str, _context: &str) -> Result<(EntryType, f32)> {
         // Шаг 1: Алгоритмические правила
         if let Some(result) = RuleEngine::classify(text) {
             if result.confidence >= self.confidence_threshold {

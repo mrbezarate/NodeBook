@@ -1,0 +1,14 @@
+[package]
+name = "brain-memory"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+brain-common = { path = "../brain-common" }
+brain-core = { path = "../brain-core" }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

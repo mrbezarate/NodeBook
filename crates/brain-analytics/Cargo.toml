@@ -8,3 +8,7 @@ brain-common = { workspace = true }
 serde = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
+brain-events = { path = "../brain-events" }
+brain-core = { path = "../brain-core" }
+async-trait = { workspace = true }
+tokio = { workspace = true }

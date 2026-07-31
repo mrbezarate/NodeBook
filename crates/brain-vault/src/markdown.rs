@@ -21,23 +21,36 @@ impl MarkdownBuilder {
         };
         let mut md = fm.to_yaml_block();
         md.push('\n');
+        
+        md.push_str(&format!("# {}\n\n", fm.title));
+
+        if !entry.classification.summary.is_empty() {
+            md.push_str(&entry.classification.summary);
+            md.push_str("\n\n");
+        }
+
+        md.push_str("## Оригинальная запись\n\n");
         md.push_str(&entry.raw_text);
         md.push_str("\n\n");
-        // Wikilinks section
-        if !entry.classification.suggested_links.is_empty() {
-            md.push_str("## Связи\n\n");
+
+        if !entry.classification.suggested_links.is_empty() || !entry.classification.entities.is_empty() {
+            md.push_str("## Граф Знаний\n\n");
+            
             for link in &entry.classification.suggested_links {
-                md.push_str(&format!("- [[{}]]\n", link));
+                md.push_str(&format!("- **{}**: [[{}]]\n", link.relation, link.target));
+            }
+            for e in &entry.classification.entities {
+                md.push_str(&format!("- Упоминается: [[{}]] ({:?})\n", e.name, e.entity_type));
             }
             md.push('\n');
         }
-        // Entities section
-        if !entry.classification.entities.is_empty() {
-            md.push_str("## Сущности\n\n");
-            for e in &entry.classification.entities {
-                md.push_str(&format!("- [[{}]] ({:?})\n", e.name, e.entity_type));
-            }
+
+        if !entry.classification.tags.is_empty() {
+            let tags_str = entry.classification.tags.iter().map(|t| format!("#{}", t)).collect::<Vec<_>>().join(" ");
+            md.push_str(&tags_str);
+            md.push('\n');
         }
+
         md
     }
 }

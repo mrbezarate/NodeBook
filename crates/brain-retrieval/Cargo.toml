@@ -1,0 +1,14 @@
+[package]
+name = "brain-retrieval"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+brain-common = { path = "../brain-common" }
+brain-core = { path = "../brain-core" }
+async-trait = { workspace = true }

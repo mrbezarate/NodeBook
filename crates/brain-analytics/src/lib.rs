@@ -3,3 +3,4 @@ pub mod correlation;
 pub mod insights;
 pub mod stats;
 pub mod trends;
+pub mod engine;

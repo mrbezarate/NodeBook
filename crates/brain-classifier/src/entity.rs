@@ -15,13 +15,13 @@ impl EntityExtractor for HybridEntityExtractor {
         let mut entities = Vec::new();
         for &tech in KNOWN_TECH {
             if lower.contains(tech) {
-                entities.push(Entity { name: tech.to_string(), entity_type: EntityType::Technology });
+                entities.push(Entity::new(tech, EntityType::Technology));
             }
         }
         // URL → Tool entity
         for word in text.split_whitespace() {
             if word.starts_with("http://") || word.starts_with("https://") {
-                entities.push(Entity { name: word.to_string(), entity_type: EntityType::Tool });
+                entities.push(Entity::new(word, EntityType::Tool));
             }
         }
         Ok(entities)

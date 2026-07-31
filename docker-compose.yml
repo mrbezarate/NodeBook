@@ -25,7 +25,7 @@ services:
     env_file:
       - .env
     environment:
-      - TZ=Asia/Yekaterinburg
+      - TZ=Asia/Almaty
     volumes:
       - ./base:/app/base
       - ./config.toml:/app/config.toml:ro

@@ -11,6 +11,9 @@ impl AiProvider for NoopAiProvider {
     async fn complete(&self, _prompt: &str) -> Result<String> {
         Err(BrainError::Ai("AI disabled (NoopProvider)".into()))
     }
+    async fn complete_json(&self, _prompt: &str) -> Result<String> {
+        Err(BrainError::Ai("AI disabled (NoopProvider)".into()))
+    }
     async fn classify(&self, _text: &str, _categories: &[&str]) -> Result<(String, f32)> {
         Err(BrainError::Ai("AI disabled (NoopProvider)".into()))
     }

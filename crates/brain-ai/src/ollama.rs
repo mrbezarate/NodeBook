@@ -14,7 +14,13 @@ pub struct OllamaProvider {
 }
 
 #[derive(Serialize)]
-struct GenerateRequest<'a> { model: &'a str, prompt: &'a str, stream: bool }
+struct GenerateRequest<'a> { 
+    model: &'a str, 
+    prompt: &'a str, 
+    stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    format: Option<&'a str>,
+}
 
 #[derive(Deserialize)]
 struct GenerateResponse { response: String }
@@ -40,7 +46,17 @@ impl OllamaProvider {
 impl AiProvider for OllamaProvider {
     async fn complete(&self, prompt: &str) -> Result<String> {
         let url = format!("{}/api/generate", self.base_url);
-        let req = GenerateRequest { model: &self.model, prompt, stream: false };
+        let req = GenerateRequest { model: &self.model, prompt, stream: false, format: None };
+        let resp = self.client.post(&url).json(&req).send().await
+            .map_err(|e| BrainError::Ai(e.to_string()))?;
+        let body: GenerateResponse = resp.json().await
+            .map_err(|e| BrainError::Ai(e.to_string()))?;
+        Ok(body.response)
+    }
+
+    async fn complete_json(&self, prompt: &str) -> Result<String> {
+        let url = format!("{}/api/generate", self.base_url);
+        let req = GenerateRequest { model: &self.model, prompt, stream: false, format: Some("json") };
         let resp = self.client.post(&url).json(&req).send().await
             .map_err(|e| BrainError::Ai(e.to_string()))?;
         let body: GenerateResponse = resp.json().await

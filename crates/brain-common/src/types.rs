@@ -126,14 +126,76 @@ pub enum EntityType {
     Tool,
     Language,
     Framework,
+    Project,
     Custom(String),
 }
 
-/// Извлечённая сущность из текста.
+/// Извлечённая или хранящаяся сущность (базовый объект Knowledge Store).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Observation {
+    pub id: String,
+    pub raw_event_id: String,
+    pub entity_id: String,
+    pub fact: String,
+    pub confidence: f32,
+    pub schema_version: u32,
+    pub extractor_version: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entity {
-    pub name: String,
+    pub id: String,                 // Canonical ID (e.g. "project_space_cowboy")
+    pub name: String,               // Display/Canonical Name
+    pub aliases: Vec<String>,       // Known aliases
     pub entity_type: EntityType,
+    pub area: Option<Area>,
+    pub summary: String,
+    pub tags: Vec<String>,
+    pub links: Vec<SemanticLink>,
+    pub sources: Vec<EntrySource>,  // Sources of Truth (where this info came from)
+    pub observations: Vec<Observation>, // Атомарные факты
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum MatchMethod {
+    Exact,
+    Alias,
+    Fuzzy,
+    Semantic,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolutionResult {
+    pub entity: Entity,
+    pub confidence: f32,
+    pub matched_by: MatchMethod,
+}
+
+impl Entity {
+    pub fn new(name: &str, entity_type: EntityType) -> Self {
+        let id = name.to_lowercase().replace(" ", "_");
+        Self {
+            id: format!("{:?}_{}", entity_type, id).to_lowercase(),
+            name: name.to_string(),
+            aliases: vec![],
+            entity_type,
+            area: None,
+            summary: String::new(),
+            tags: vec![],
+            links: vec![],
+            sources: vec![],
+            observations: vec![],
+        }
+    }
+}
+
+// ── Семантические связи ─────────────────────────────────────
+
+/// Семантическая связь между узлами (Semantic Graph Edge)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SemanticLink {
+    pub target: String,
+    pub relation: String,
 }
 
 // ── Классификация ───────────────────────────────────────────
@@ -148,7 +210,8 @@ pub struct Classification {
     pub tags: Vec<String>,
     pub confidence: f32,
     pub suggested_title: String,
-    pub suggested_links: Vec<String>,
+    pub suggested_links: Vec<SemanticLink>,
+    pub summary: String,
 }
 
 // ── Источник записи ─────────────────────────────────────────
@@ -160,6 +223,27 @@ pub enum EntrySource {
     Cli,
     Web,
     Import,
+}
+
+// ── Event Sourcing ────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawEvent {
+    pub id: String,
+    pub source_type: String, // e.g. "telegram"
+    pub source_id: String,   // user_id
+    pub external_id: Option<String>, // message_id
+    pub payload: String,     // original JSON
+    pub text: String,        // extracted text
+    pub status: String,      // "pending", "processing", "completed", "failed"
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Job {
+    pub id: String,
+    pub raw_event_id: String,
+    pub job_type: String, // "consolidate"
+    pub status: String,   // "pending", "running", "completed", "failed"
 }
 
 // ── Запись Brain ────────────────────────────────────────────
@@ -233,4 +317,25 @@ impl DiaryMetrics {
             free_thoughts: None,
         }
     }
+}
+
+/// Отчёт о системных метриках
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemMetricsReport {
+    pub processed_events: i64,
+    pub avg_latency_ms: f64,
+    pub json_success_rate: f64,
+    pub empty_responses_percent: f64,
+    pub avg_entities_extracted: f64,
+    pub avg_confidence: f64,
+    
+    pub identity_exact: i64,
+    pub identity_alias: i64,
+    pub identity_fuzzy: i64,
+    pub identity_semantic: i64,
+    pub identity_nomatch: i64,
+    
+    pub total_entities: i64,
+    pub total_observations: i64,
+    pub avg_obs_per_entity: f64,
 }

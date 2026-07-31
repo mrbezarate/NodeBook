@@ -4,13 +4,18 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-brain-common = { workspace = true }
-brain-config = { workspace = true }
-brain-core = { workspace = true }
-brain-diary = { workspace = true }
-brain-classifier = { workspace = true }
-brain-vault = { workspace = true }
-brain-ai = { workspace = true }
+brain-common = { path = "../../crates/brain-common" }
+brain-core = { path = "../../crates/brain-core" }
+brain-config = { path = "../../crates/brain-config" }
+brain-diary = { path = "../../crates/brain-diary" }
+brain-classifier = { path = "../../crates/brain-classifier" }
+brain-vault = { path = "../../crates/brain-vault" }
+brain-ai = { path = "../../crates/brain-ai" }
+brain-retrieval = { path = "../../crates/brain-retrieval" }
+brain-events = { path = "../../crates/brain-events" }
+brain-memory = { path = "../../crates/brain-memory" }
+brain-reasoner = { path = "../../crates/brain-reasoner" }
+brain-analytics = { path = "../../crates/brain-analytics" }
 async-trait = "0.1"
 
 teloxide = { workspace = true }

@@ -26,6 +26,9 @@ pub enum BrainError {
     #[error("Graph error: {0}")]
     Graph(String),
 
+    #[error("Database error: {0}")]
+    Database(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 

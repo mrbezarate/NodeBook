@@ -31,11 +31,11 @@ impl Pipeline {
     /// 5. Маршрутизировать в PARA (чистый алгоритм)
     /// 6. Сгенерировать заголовок (шаблон + AI)
     /// 7. Предложить связи (cosine similarity)
-    pub async fn process(&self, raw_text: &str, source: EntrySource) -> Result<BrainEntry> {
+    pub async fn process(&self, raw_text: &str, source: EntrySource, context_str: &str) -> Result<BrainEntry> {
         tracing::info!("Pipeline: processing new entry");
 
         // Шаг 1: Классификация типа
-        let (entry_type, type_confidence) = self.type_classifier.classify_type(raw_text).await?;
+        let (entry_type, type_confidence) = self.type_classifier.classify_type(raw_text, context_str).await?;
         tracing::debug!("Type: {} (confidence: {:.2})", entry_type, type_confidence);
 
         // Шаг 2: Определение области
@@ -51,10 +51,10 @@ impl Pipeline {
         tracing::debug!("PARA: {}", para_category);
 
         // Шаг 6: Генерация заголовка
-        let suggested_title = self.title_generator.generate_title(raw_text, &entry_type).await?;
+        let suggested_title = self.title_generator.generate_title(raw_text, &entry_type, context_str).await?;
 
         // Шаг 7: Предложение связей
-        let suggested_links = self.link_suggester.suggest_links(raw_text, 5).await?;
+        let suggested_links = self.link_suggester.suggest_links(raw_text, 5, context_str).await?;
 
         // Собираем промежуточную классификацию для генерации тегов
         let mut classification = Classification {
@@ -66,10 +66,11 @@ impl Pipeline {
             confidence: type_confidence,
             suggested_title,
             suggested_links,
+            summary: String::new(),
         };
 
         // Шаг 4: Генерация тегов (после остальной классификации)
-        let tags = self.tag_generator.generate_tags(raw_text, &classification).await?;
+        let tags = self.tag_generator.generate_tags(raw_text, &classification, context_str).await?;
         classification.tags = tags;
 
         // Собираем BrainEntry

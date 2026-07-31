@@ -254,6 +254,8 @@ fn generate_obsidian_markdown(metrics: &DiaryMetrics) -> String {
     let m = metrics;
     let date = m.date;
     let avg = metrics_average(m);
+    let yesterday = date.pred_opt().unwrap_or(date);
+    let tomorrow = date.succ_opt().unwrap_or(date);
 
     // YAML frontmatter
     let mut md = format!("\
@@ -269,6 +271,7 @@ sleep_hours: {sleep}
 exercise: {exercise}
 average: {avg:.1}
 type: daily
+tags: [дневник, daily, итоги]
 created_by: brain-bot
 ---
 
@@ -285,10 +288,11 @@ created_by: brain-bot
         avg = avg,
     );
 
-    // Заголовок
+    // Заголовок и навигационная цепочка для Графа Obsidian
     md.push_str(&format!("# 📅 {} {} {} — {}\n\n",
         date.day(), russian_month(date.month()), date.year(), russian_weekday(date)
     ));
+    md.push_str(&format!("[[{}|◄ Вчера]] | **{}** | [[{}|Завтра ►]]\n\n", yesterday, date, tomorrow));
 
     // Таблица метрик
     md.push_str("## 📊 Метрики\n\n");
@@ -348,7 +352,11 @@ created_by: brain-bot
     } else {
         md.push_str("_нет записей_\n");
     }
-    md.push_str("\n---\n");
+    md.push_str("\n---\n\n");
+
+    // Теги для Графа Obsidian
+    md.push_str("## 🏷 Граф и Теги\n");
+    md.push_str("#дневник #daily #итоги #brain-os\n");
 
     md
 }

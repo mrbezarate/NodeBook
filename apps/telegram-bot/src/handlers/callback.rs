@@ -11,7 +11,20 @@ pub async fn handle_callback(
     query: CallbackQuery,
     engine: Arc<BrainEngine>,
     state_manager: Arc<StateManager>,
+    analytics_engine: Arc<brain_analytics::engine::LifeAnalyticsEngine>,
 ) -> anyhow::Result<()> {
+    let user_id = query.from.id.0;
+    let chat_id = query.message.as_ref().map(|m| m.chat().id);
+    let message_id = query.message.as_ref().map(|m| m.id());
+
+    // ЖЁСТКАЯ АУТЕНТИФИКАЦИЯ ДЛЯ CALLBACKS
+    let allowed = &engine.config.telegram.allowed_users;
+    if allowed.is_empty() || !allowed.contains(&user_id) {
+        tracing::warn!("🚫 Попытка несанкционированного callback от user_id: {}", user_id);
+        bot.answer_callback_query(&query.id).text("🔒 Доступ запрещён.").show_alert(true).await?;
+        return Ok(());
+    }
+
     // Answer the callback query first (removes loading spinner)
     bot.answer_callback_query(&query.id).await?;
     
@@ -25,16 +38,29 @@ pub async fn handle_callback(
         None => return Ok(()),
     };
     
-    let user_id = query.from.id.0;
-    let chat_id = query.message.as_ref().map(|m| m.chat().id);
-    let message_id = query.message.as_ref().map(|m| m.id());
-    
     match prefix.as_str() {
         "diary" | "metric" | "exercise" => {
             if let (Some(chat_id), Some(message_id)) = (chat_id, message_id) {
                 crate::handlers::diary::handle_diary_callback(
                     &bot, chat_id, message_id, user_id, &prefix, &value, &engine, &state_manager
                 ).await?;
+            }
+        }
+        "analytics" => {
+            if let (Some(chat_id), Some(message_id)) = (chat_id, message_id) {
+                crate::handlers::analytics::handle_analytics_callback(
+                    &bot, chat_id, message_id, &value, &engine, &analytics_engine
+                ).await?;
+            }
+        }
+        "path" => {
+            if let Some(chat_id) = chat_id {
+                bot.send_message(
+                    chat_id,
+                    format!("📁 <b>Файл сохранён в вашей хранилище Obsidian:</b>\n<code>{}/.../{}</code>", engine.config.vault.path, value)
+                )
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .await?;
             }
         }
         _ => {

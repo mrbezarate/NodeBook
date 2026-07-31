@@ -7,14 +7,22 @@ use crate::markdown::MarkdownBuilder;
 use crate::para::VaultParaRouter;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
+use std::sync::Arc;
+use brain_indexer::BrainIndexer;
 
-pub struct ObsidianVault { root: PathBuf, para_router: VaultParaRouter }
+pub struct ObsidianVault { 
+    root: PathBuf, 
+    para_router: VaultParaRouter,
+    indexer: Arc<BrainIndexer>,
+}
 
 impl ObsidianVault {
     pub fn new(root: impl Into<PathBuf>, para_config: ParaConfig) -> Self {
         let root = root.into();
         let para_router = VaultParaRouter::new(para_config, root.clone());
-        Self { root, para_router }
+        let index_path = root.join(".brain_index");
+        let indexer = Arc::new(BrainIndexer::new(Some(&index_path)).expect("Failed to init indexer"));
+        Self { root, para_router, indexer }
     }
 }
 
@@ -31,8 +39,15 @@ impl VaultStorage for ObsidianVault {
         }
         let md = MarkdownBuilder::build(entry);
         tokio::fs::write(&path, md).await?;
+        
+        // Add to full-text index
+        let id_str = path.to_string_lossy().to_string();
+        if let Err(e) = self.indexer.add_document(&id_str, &entry.classification.suggested_title, &entry.raw_text, &entry.classification.tags).await {
+            tracing::warn!("Failed to index document {}: {}", id_str, e);
+        }
+
         tracing::info!("Written: {}", path.display());
-        Ok(path.to_string_lossy().to_string())
+        Ok(id_str)
     }
 
     async fn read_entry(&self, path: &str) -> Result<String> {
@@ -50,41 +65,12 @@ impl VaultStorage for ObsidianVault {
     }
 
     async fn search_by_tag(&self, tag: &str) -> Result<Vec<SearchResult>> {
-        let mut results = Vec::new();
-        let entries = self.list_entries("").await?;
-        for path in entries {
-            if let Ok(content) = tokio::fs::read_to_string(&path).await {
-                if content.contains(&format!("- {}", tag)) || content.contains(&format!("#{}", tag)) {
-                    results.push(SearchResult {
-                        entry_id: EntryId::from_string(&path),
-                        file_path: path.clone(),
-                        title: Path::new(&path).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default(),
-                        snippet: content.chars().take(200).collect(),
-                        score: 1.0,
-                    });
-                }
-            }
-        }
+        let results = self.indexer.search(tag, 20).map_err(|e| BrainError::Vault(format!("Index search error: {}", e)))?;
         Ok(results)
     }
 
     async fn search_by_text(&self, query: &str) -> Result<Vec<SearchResult>> {
-        let mut results = Vec::new();
-        let lower_query = query.to_lowercase();
-        let entries = self.list_entries("").await?;
-        for path in entries {
-            if let Ok(content) = tokio::fs::read_to_string(&path).await {
-                if content.to_lowercase().contains(&lower_query) {
-                    results.push(SearchResult {
-                        entry_id: EntryId::from_string(&path),
-                        file_path: path.clone(),
-                        title: Path::new(&path).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default(),
-                        snippet: content.chars().take(200).collect(),
-                        score: 0.8,
-                    });
-                }
-            }
-        }
+        let results = self.indexer.search(query, 20).map_err(|e| BrainError::Vault(format!("Index search error: {}", e)))?;
         Ok(results)
     }
 
