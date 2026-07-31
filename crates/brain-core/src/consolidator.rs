@@ -135,13 +135,12 @@ impl Consolidator {
         // 6. Renderer: обновляем Markdown
         self.renderer.render(&entity).await?;
 
-        // 7. Output Delivery
+        // 7. Output Delivery — одно финальное сообщение
         if let Some(sink) = &self.output_sink {
-            let output = brain_common::output::Output::persistent_resource(format!("{}.md", entity.name));
+            let output = brain_common::output::Output::persistent_resource(
+                format!("{}.md", entity.name)
+            );
             let _ = sink.send(output).await;
-            
-            let text_output = brain_common::output::Output::text(format!("✅ Updated entity: {}", entity.name));
-            let _ = sink.send(text_output).await;
         }
 
         Ok(())

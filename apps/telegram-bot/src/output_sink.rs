@@ -22,14 +22,15 @@ impl OutputSink for TelegramOutputSink {
     async fn send(&self, output: Output) -> Result<()> {
         let msg = match &output.payload {
             OutputPayload::InlineText { text } => {
-                format!("✅ <b>Готово! Записал в Obsidian.</b>\n\n{}", text)
+                format!("✅ <b>Готово!</b> {}", text)
             }
             OutputPayload::Resource { resource_id } => {
+                // Берём имя файла без пути и расширения как название сущности
                 let name = std::path::Path::new(resource_id)
-                    .file_name()
+                    .file_stem()
                     .and_then(|n| n.to_str())
                     .unwrap_or(resource_id);
-                format!("✅ <b>Готово!</b>\n📁 Сохранено: <code>{}</code>", name)
+                format!("✅ <b>Записал в Obsidian:</b> <code>{}</code>", name)
             }
         };
 
