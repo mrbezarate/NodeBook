@@ -217,6 +217,10 @@ pub struct OpenAiConfig {
     pub model: String,
     #[serde(default = "default_openai_url")]
     pub base_url: String,
+    #[serde(default)]
+    pub heavy_model: String,
+    #[serde(default)]
+    pub embedding_model: String,
 }
 
 fn default_openai_model() -> String { "gpt-4o-mini".into() }

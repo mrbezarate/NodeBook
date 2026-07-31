@@ -84,19 +84,33 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Initialize AI providers
-    let ollama_provider = Arc::new(brain_ai::ollama::OllamaProvider::new(
-        config.ai.ollama.base_url.clone(),
-        config.ai.ollama.model.clone(),
-        config.ai.ollama.embedding_model.clone(),
-    ));
-    let ai_provider = ollama_provider.clone() as Arc<dyn brain_core::traits::AiProvider>;
-    let embeddings = ollama_provider.clone() as Arc<dyn brain_core::traits::EmbeddingProvider>;
-
-    let heavy_ai_provider = Arc::new(brain_ai::ollama::OllamaProvider::new(
-        config.ai.ollama.base_url.clone(),
-        config.ai.ollama.heavy_model.clone(),
-        config.ai.ollama.embedding_model.clone(),
-    )) as Arc<dyn brain_core::traits::AiProvider>;
+    let (ai_provider, embeddings, heavy_ai_provider): (Arc<dyn AiProvider>, Arc<dyn EmbeddingProvider>, Arc<dyn AiProvider>) = if config.ai.provider == "openai" {
+        let provider = Arc::new(brain_ai::openai::OpenAiProvider::new(
+            config.ai.openai.base_url.clone(),
+            config.ai.openai.api_key.clone(),
+            config.ai.openai.model.clone(),
+            config.ai.openai.embedding_model.clone(),
+        ));
+        let heavy = Arc::new(brain_ai::openai::OpenAiProvider::new(
+            config.ai.openai.base_url.clone(),
+            config.ai.openai.api_key.clone(),
+            config.ai.openai.heavy_model.clone(),
+            config.ai.openai.embedding_model.clone(),
+        ));
+        (provider.clone(), provider.clone(), heavy.clone())
+    } else {
+        let ollama = Arc::new(brain_ai::ollama::OllamaProvider::new(
+            config.ai.ollama.base_url.clone(),
+            config.ai.ollama.model.clone(),
+            config.ai.ollama.embedding_model.clone(),
+        ));
+        let heavy = Arc::new(brain_ai::ollama::OllamaProvider::new(
+            config.ai.ollama.base_url.clone(),
+            config.ai.ollama.heavy_model.clone(),
+            config.ai.ollama.embedding_model.clone(),
+        ));
+        (ollama.clone(), ollama.clone(), heavy.clone())
+    };
 
     // Initialize base components
     let entity_extractor = Arc::new(brain_classifier::HybridEntityExtractor::new());
