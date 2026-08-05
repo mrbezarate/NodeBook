@@ -741,14 +741,10 @@ impl RawEventStore for SqliteKnowledgeStore {
     async fn next_unprocessed_event(&self, event_type: &str) -> Result<Option<brain_common::SourcingEventRecord>> {
         let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
         let mut stmt = conn.prepare(
-            "UPDATE audit_events SET processed = 1 
-             WHERE id = (
-                SELECT id FROM audit_events 
-                WHERE processed = 0 AND event_type = ?1
-                ORDER BY created_at ASC 
-                LIMIT 1
-             )
-             RETURNING id, aggregate_id, payload, created_at"
+            "SELECT id, aggregate_id, payload, created_at FROM audit_events 
+             WHERE processed = 0 AND event_type = ?1
+             ORDER BY created_at ASC 
+             LIMIT 1"
         ).map_err(|e| BrainError::Database(e.to_string()))?;
 
         let res = stmt.query_row(rusqlite::params![event_type], |row| {
@@ -780,14 +776,10 @@ impl RawEventStore for SqliteKnowledgeStore {
     async fn next_unprojected_event_any(&self) -> Result<Option<brain_common::SourcingEventRecord>> {
         let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
         let mut stmt = conn.prepare(
-            "UPDATE audit_events SET projected = 1 
-             WHERE id = (
-                SELECT id FROM audit_events 
-                WHERE projected = 0 
-                ORDER BY created_at ASC 
-                LIMIT 1
-             )
-             RETURNING id, aggregate_id, payload, created_at"
+            "SELECT id, aggregate_id, payload, created_at FROM audit_events 
+             WHERE projected = 0 
+             ORDER BY created_at ASC 
+             LIMIT 1"
         ).map_err(|e| BrainError::Database(e.to_string()))?;
 
         let record = stmt.query_row([], |row| {
