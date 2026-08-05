@@ -336,6 +336,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             }
                         }
+                        let _ = store_clone.mark_event_processed(&record.id).await;
                     }
                     Ok(None) => tokio::time::sleep(std::time::Duration::from_millis(500)).await,
                     Err(_) => tokio::time::sleep(std::time::Duration::from_secs(1)).await,
