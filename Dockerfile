@@ -28,6 +28,7 @@ RUN apt-get update && apt-get install -y \
     libsqlite3-0 \
     libssl3 \
     ca-certificates \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
