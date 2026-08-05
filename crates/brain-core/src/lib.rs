@@ -12,6 +12,8 @@ pub mod extractor;
 pub mod identity;
 pub mod projection;
 pub mod db;
+pub mod retrieval;
+pub mod linking;
 
 pub use engine::{BrainEngine, BrainEngineBuilder, Stats};
 pub use pipeline::{Pipeline, PipelineBuilder};

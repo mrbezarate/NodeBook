@@ -24,7 +24,7 @@ impl ProjectionEngine for SimpleProjectionEngine {
         let mut aggregated_summary = String::new();
         let mut entity_name = format!("Generated Name for {}", entity_id);
         
-        for obs in observations {
+        for obs in &observations {
             // Try to parse the fact as StructuredObservation.
             // If it fails, just append the raw fact text.
             if let Ok(structured) = serde_json::from_str::<StructuredObservation>(&obs.fact) {
@@ -33,7 +33,9 @@ impl ProjectionEngine for SimpleProjectionEngine {
                 
                 // Восстанавливаем каноническое имя сущности из самого первого наблюдения
                 if entity_name.starts_with("Generated Name for") {
-                    if let Some(name) = structured.entities.first() {
+                    if let Some(title) = &structured.title {
+                        entity_name = title.clone();
+                    } else if let Some(name) = structured.entities.first() {
                         entity_name = name.clone();
                     }
                 }
@@ -47,10 +49,22 @@ impl ProjectionEngine for SimpleProjectionEngine {
             aggregated_summary = "Нет наблюдений.".to_string();
         }
 
+        let mut all_tags: Vec<String> = Vec::new();
+        for obs in &observations {
+            if let Ok(structured) = serde_json::from_str::<StructuredObservation>(&obs.fact) {
+                for tag in structured.tags {
+                    if !all_tags.contains(&tag) {
+                        all_tags.push(tag);
+                    }
+                }
+            }
+        }
+
         let mut entity = Entity::new(&entity_name, EntityType::Concept);
         entity.id = entity_id.to_string();
         entity.area = Some(Area::Life);
         entity.summary = aggregated_summary.trim().to_string();
+        entity.tags = all_tags;
         Ok(entity)
     }
 }

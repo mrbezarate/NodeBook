@@ -1,27 +1,54 @@
 use std::sync::Arc;
 use brain_common::{ResolutionResult, MatchMethod, Result};
-use crate::traits::{IdentityResolver, KnowledgeStore, AiProvider};
+use crate::traits::{IdentityResolver, KnowledgeStore, AiProvider, VectorStorage, EmbeddingProvider};
 use strsim::jaro_winkler;
 
 pub struct CascadedIdentityResolver {
     store: Arc<dyn KnowledgeStore>,
     ai: Arc<dyn AiProvider>,
+    vector_store: Arc<dyn VectorStorage>,
+    embeddings: Arc<dyn EmbeddingProvider>,
 }
 
 impl CascadedIdentityResolver {
-    pub fn new(store: Arc<dyn KnowledgeStore>, ai: Arc<dyn AiProvider>) -> Self {
-        Self { store, ai }
+    pub fn new(
+        store: Arc<dyn KnowledgeStore>, 
+        ai: Arc<dyn AiProvider>,
+        vector_store: Arc<dyn VectorStorage>,
+        embeddings: Arc<dyn EmbeddingProvider>,
+    ) -> Self {
+        Self { store, ai, vector_store, embeddings }
     }
 }
 
 #[async_trait::async_trait]
 impl IdentityResolver for CascadedIdentityResolver {
     async fn resolve(&self, query: &str) -> Result<Option<ResolutionResult>> {
-        let entities = self.store.list_entities(None).await?;
+        // Embed the query for semantic search
+        let query_embedding = self.embeddings.embed(query).await?;
+        
+        // Retrieve top 20 semantic candidates
+        let search_results = self.vector_store.search(&query_embedding, 20).await?;
+        
+        if search_results.is_empty() {
+            return Ok(None);
+        }
+
+        let mut candidates = Vec::new();
+        for res in search_results {
+            // Check if it's an entity by its vector ID (assuming format "entity:Name")
+            if res.0.starts_with("entity:") {
+                let entity_name = res.0.trim_start_matches("entity:");
+                if let Ok(Some(entity)) = self.store.get_entity(entity_name).await {
+                    candidates.push(entity);
+                }
+            }
+        }
+
         let q_lower = query.to_lowercase();
         
         // 1. Exact match (by name)
-        for e in &entities {
+        for e in &candidates {
             if e.name.to_lowercase() == q_lower {
                 return Ok(Some(ResolutionResult {
                     entity: e.clone(),
@@ -32,7 +59,7 @@ impl IdentityResolver for CascadedIdentityResolver {
         }
         
         // 2. Alias match
-        for e in &entities {
+        for e in &candidates {
             for alias in &e.aliases {
                 if alias.to_lowercase() == q_lower {
                     return Ok(Some(ResolutionResult {
@@ -48,19 +75,19 @@ impl IdentityResolver for CascadedIdentityResolver {
         let mut best_match = None;
         let mut best_score = 0.0;
         
-        for e in &entities {
-            let score = jaro_winkler(&q_lower, &e.name.to_lowercase());
-            if score > best_score {
-                best_score = score;
-                best_match = Some(e.clone());
-            }
+        for e in &candidates {
+            let mut max_score = jaro_winkler(&q_lower, &e.name.to_lowercase());
             
             for alias in &e.aliases {
                 let score = jaro_winkler(&q_lower, &alias.to_lowercase());
-                if score > best_score {
-                    best_score = score;
-                    best_match = Some(e.clone());
+                if score > max_score {
+                    max_score = score;
                 }
+            }
+            
+            if max_score > best_score {
+                best_score = max_score;
+                best_match = Some(e.clone());
             }
         }
         
@@ -73,9 +100,8 @@ impl IdentityResolver for CascadedIdentityResolver {
         }
         
         // 4. Semantic Match using LLM
-        if !entities.is_empty() {
-            // Ограничиваем список кандидатов для LLM
-            let candidate_names: Vec<String> = entities.iter().map(|e| e.name.clone()).collect();
+        if !candidates.is_empty() {
+            let candidate_names: Vec<String> = candidates.iter().map(|e| e.name.clone()).collect();
             let prompt = format!(
                 "Do any of these existing entities semantically match the query '{}'?\n\
                  Candidates: {:?}\n\
@@ -87,7 +113,7 @@ impl IdentityResolver for CascadedIdentityResolver {
             if let Ok(response) = self.ai.complete(&prompt).await {
                 let resp_trim = response.trim();
                 if resp_trim != "NONE" {
-                    if let Some(matched_entity) = entities.iter().find(|e| e.name == resp_trim) {
+                    if let Some(matched_entity) = candidates.iter().find(|e| e.name == resp_trim) {
                         return Ok(Some(ResolutionResult {
                             entity: matched_entity.clone(),
                             confidence: 0.8,
@@ -102,7 +128,7 @@ impl IdentityResolver for CascadedIdentityResolver {
     }
 
     async fn register_alias(&self, _canonical_id: &str, _alias: &str) -> Result<()> {
-        // Alias registration happens via DB, so we'll just ignore for now or implement if needed.
         Ok(())
     }
 }
+

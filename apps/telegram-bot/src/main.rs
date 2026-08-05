@@ -17,54 +17,63 @@ use crate::state::StateManager;
 
 // Old generators removed: AiTagGenerator, AiTitleGenerator, AiLinkSuggester are now inside AgenticPipeline
 
-/// Background task: schedule evening diary at configured time.
-async fn evening_scheduler(
+/// Настройка планировщика
+async fn setup_scheduler(
     bot: teloxide::Bot,
     config: brain_config::BrainConfig,
     engine: Arc<brain_core::engine::BrainEngine>,
     state_manager: Arc<StateManager>,
-) {
-    use chrono::{Local, NaiveTime, Timelike};
+) -> anyhow::Result<tokio_cron_scheduler::JobScheduler> {
+    use tokio_cron_scheduler::{JobScheduler, Job};
     
-    let review_time = NaiveTime::parse_from_str(&config.diary.evening_review_time, "%H:%M")
-        .unwrap_or_else(|_| NaiveTime::from_hms_opt(21, 0, 0).unwrap());
+    let sched = JobScheduler::new().await?;
+
+    let review_time = config.diary.evening_review_time.clone();
+    let parts: Vec<&str> = review_time.split(':').collect();
+    let hour = parts.get(0).unwrap_or(&"21");
+    let minute = parts.get(1).unwrap_or(&"00");
     
-    tracing::info!("📅 Scheduler: evening diary at {}", review_time);
+    // Формат cron: sec min hour day month day_of_week
+    let cron_expr = format!("0 {} {} * * *", minute, hour);
     
-    let mut triggered_today = false;
+    tracing::info!("📅 Setup scheduler: evening diary cron {}", cron_expr);
     
-    loop {
-        let now = Local::now();
-        let current_time = now.time();
-        let _current_date = now.date_naive();
+    sched.add(Job::new_async(cron_expr.as_str(), move |_uuid, _l| {
+        let bot = bot.clone();
+        let config = config.clone();
+        let engine = engine.clone();
+        let state_manager = state_manager.clone();
         
-        // Check if it's time and we haven't triggered today
-        if current_time.hour() == review_time.hour()
-            && current_time.minute() == review_time.minute()
-            && !triggered_today
-        {
+        Box::pin(async move {
             tracing::info!("🌙 Triggering evening diary review");
-            triggered_today = true;
-            
-            // Send diary to all allowed users
             for &user_id in &config.telegram.allowed_users {
                 let chat_id = teloxide::types::ChatId(user_id as i64);
-                if let Err(e) = handlers::diary::start_diary(
-                    &bot, chat_id, user_id, &engine, &state_manager
-                ).await {
-                    tracing::error!("Failed to start diary for user {}: {}", user_id, e);
+                let mut success = false;
+                let backoff_secs = [5, 30, 120];
+                for (i, &delay) in backoff_secs.iter().enumerate() {
+                    let attempt = i + 1;
+                    match crate::handlers::diary::start_diary(
+                        &bot, chat_id, user_id, &engine, &state_manager
+                    ).await {
+                        Ok(_) => {
+                            tracing::info!("Diary review sent to user {}", user_id);
+                            success = true;
+                            break;
+                        }
+                        Err(e) => {
+                            tracing::warn!("Attempt {} failed to start diary for user {}: {}", attempt, user_id, e);
+                            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                        }
+                    }
+                }
+                if !success {
+                    tracing::error!("CRITICAL: Failed to start diary for user {} after 3 attempts", user_id);
                 }
             }
-        }
-        
-        // Reset trigger at midnight
-        if current_time.hour() == 0 && current_time.minute() == 0 {
-            triggered_today = false;
-        }
-        
-        // Sleep for 30 seconds before next check
-        tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
-    }
+        })
+    })?).await?;
+    
+    Ok(sched)
 }
 
 #[tokio::main]
@@ -142,6 +151,12 @@ async fn main() -> anyhow::Result<()> {
     let vault_store = Arc::new(brain_vault::EntityVault::new(config.vault.path.clone()));
     let knowledge_store = Arc::new(brain_core::db::SqliteKnowledgeStore::new("brain.db")?);
 
+    let graph_path = std::path::PathBuf::from(&config.vault.path).join(".brain_graph.json");
+    let graph = match brain_graph::KnowledgeGraph::load(graph_path.to_str().unwrap()).await {
+        Ok(g) => Arc::new(g),
+        Err(_) => Arc::new(brain_graph::KnowledgeGraph::new()),
+    };
+
     // Bot must be created early so OutputSink can use it
     let bot = teloxide::Bot::new(&config.telegram.bot_token);
 
@@ -153,31 +168,18 @@ async fn main() -> anyhow::Result<()> {
         Some(context_manager.clone()),
     ));
     
-    // Consolidator
+    // Identity Resolver
     let identity_resolver = Arc::new(brain_core::identity::CascadedIdentityResolver::new(
         knowledge_store.clone(),
         heavy_ai_provider.clone(),
+        vector_store.clone(),
+        embeddings.clone(),
     ));
 
     // OutputSink: отправляет результат обратно в Telegram пользователю
-    let owner_chat_id = config.telegram.allowed_users
-        .first()
-        .copied()
-        .unwrap_or(0);
-    let telegram_sink = output_sink::TelegramOutputSink::new(
-        bot.clone(),
-        teloxide::types::ChatId(owner_chat_id as i64),
-    );
+    // (telegram_sink removed)
 
-    let consolidator = Arc::new(brain_core::consolidator::Consolidator::new(
-        heavy_ai_provider.clone(),
-        knowledge_store.clone(),
-        identity_resolver.clone(),
-        Arc::new(brain_core::projection::SimpleProjectionEngine::new(knowledge_store.clone())),
-        knowledge_store.clone(),
-        Arc::new(brain_core::projection::ObsidianRenderer { base_path: config.vault.path.clone().into() }),
-        Some(telegram_sink),
-    ));
+    // (Consolidator removed as we now use background pipeline directly)
 
     let analytics_engine = Arc::new(brain_analytics::engine::LifeAnalyticsEngine::new(
         heavy_ai_provider.clone(),
@@ -189,12 +191,14 @@ async fn main() -> anyhow::Result<()> {
         .pipeline(pipeline)
         .vault(vault)
         .vector_store(vector_store)
+        .graph(graph)
+        .embeddings(embeddings)
         .event_bus(event_bus)
         .context_manager(context_manager)
         .entity_validator(entity_validator)
         .identity_resolver(identity_resolver)
         .with_knowledge_store(vault_store)
-        .with_raw_event_store(knowledge_store)
+        .with_raw_event_store(knowledge_store.clone())
         .build()?;
 
     let engine = Arc::new(engine);
@@ -215,30 +219,44 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("Failed to set bot commands menu: {}", e);
     }
 
-    // Spawn evening scheduler
+    // Start health-check server
+    let health_store = knowledge_store.clone();
+    tokio::spawn(async move {
+        use axum::{routing::get, Router, http::StatusCode};
+        let app = Router::new().route("/health", get(move || {
+            let store = health_store.clone();
+            async move {
+                // Try to hit the DB
+                match store.get_metrics_report().await {
+                    Ok(_) => (StatusCode::OK, "OK"),
+                    Err(_) => (StatusCode::SERVICE_UNAVAILABLE, "DB ERROR"),
+                }
+            }
+        }));
+        
+        let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
+        tracing::info!("Health check server listening on port 8080");
+        if let Err(e) = axum::serve(listener, app).await {
+            tracing::error!("Health server error: {}", e);
+        }
+    });
+
+    // Start scheduler
     {
         let bot_clone = bot.clone();
         let config_clone = config.clone();
         let engine_clone = engine.clone();
         let sm_clone = state_manager.clone();
-        tokio::spawn(async move {
-            evening_scheduler(bot_clone, config_clone, engine_clone, sm_clone).await;
-        });
+        if let Ok(sched) = setup_scheduler(bot_clone, config_clone, engine_clone, sm_clone).await {
+            tokio::spawn(async move {
+                if let Err(e) = sched.start().await {
+                    tracing::error!("Scheduler error: {}", e);
+                }
+            });
+        }
     }
 
-    // Spawn Consolidator background worker
-    {
-        let cons = consolidator.clone();
-        tokio::spawn(async move {
-            tracing::info!("Starting Consolidator background worker");
-            loop {
-                if let Err(e) = cons.run_pending_job().await {
-                    tracing::error!("Consolidator worker error: {}", e);
-                }
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-            }
-        });
-    }
+
     
     // Build handler tree with message + callback branches
     use teloxide::prelude::*;

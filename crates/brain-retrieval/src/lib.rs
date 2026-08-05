@@ -96,6 +96,11 @@ impl VectorStorage for VectorStore {
         Ok(self.search(query_vector, limit).await)
     }
 
+    async fn get(&self, entry_id: &str) -> brain_common::Result<Option<Vec<f32>>> {
+        let entries = self.entries.read().await;
+        Ok(entries.get(entry_id).map(|e| e.vector.clone()))
+    }
+
     async fn save(&self) -> brain_common::Result<()> {
         self.save_to_disk().await.map_err(|e| brain_common::BrainError::Vault(e.to_string()))
     }

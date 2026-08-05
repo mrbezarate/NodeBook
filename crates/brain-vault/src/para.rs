@@ -13,7 +13,7 @@ impl VaultParaRouter {
     }
 
     /// Построить полный путь к файлу: vault_root/para_folder/area/title.md
-    pub fn build_path(&self, para: &ParaCategory, area: &Area, title: &str) -> PathBuf {
+    pub fn build_path(&self, para: &ParaCategory, area: &Area, title: &str, entry_id: &str) -> PathBuf {
         let para_folder = match para {
             ParaCategory::Projects => &self.config.projects,
             ParaCategory::Areas => &self.config.areas,
@@ -24,7 +24,8 @@ impl VaultParaRouter {
         let safe_title: String = title.chars()
             .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' { c } else { '_' })
             .collect();
-        self.vault_root.join(para_folder).join(area.to_string()).join(format!("{}.md", safe_title.trim()))
+        let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M");
+        self.vault_root.join(para_folder).join(area.to_string()).join(format!("{}_{}_{}.md", timestamp, safe_title.trim(), &entry_id[0..6.min(entry_id.len())]))
     }
 }
 

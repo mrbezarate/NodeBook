@@ -5,31 +5,73 @@ use std::sync::Arc;
 use brain_core::engine::BrainEngine;
 use chrono::{Datelike, Local, NaiveDate};
 
-/// Клавиатура выбора периода аналитики
-pub fn analytics_keyboard() -> InlineKeyboardMarkup {
+pub fn analytics_main_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![
-            InlineKeyboardButton::callback("📅 За эту неделю", "analytics:week"),
-            InlineKeyboardButton::callback("🗓 За этот месяц", "analytics:month"),
+            InlineKeyboardButton::callback("📈 Статистика", "analytics:menu:stats"),
+            InlineKeyboardButton::callback("🧠 AI Инсайты", "analytics:menu:ai"),
         ],
         vec![
-            InlineKeyboardButton::callback("🧠 AI Инсайты (Life Analytics)", "analytics:ai_insights"),
+            InlineKeyboardButton::callback("🎨 Визуализация", "analytics:menu:viz"),
+        ],
+    ])
+}
+
+pub fn analytics_stats_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![
+            InlineKeyboardButton::callback("Неделя", "analytics:week"),
+            InlineKeyboardButton::callback("Месяц", "analytics:month"),
         ],
         vec![
-            InlineKeyboardButton::callback("🎆 За этот год", "analytics:year"),
-            InlineKeyboardButton::callback("🕸 Граф связей Obsidian", "analytics:graph"),
+            InlineKeyboardButton::callback("Год", "analytics:year"),
+            InlineKeyboardButton::callback("Всё время", "analytics:all"),
+        ],
+        vec![
+            InlineKeyboardButton::callback("⬅️ Назад", "analytics:menu:main"),
+        ],
+    ])
+}
+
+pub fn analytics_ai_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![
+            InlineKeyboardButton::callback("Неделя", "analytics:ai_insights:7"),
+            InlineKeyboardButton::callback("Месяц", "analytics:ai_insights:30"),
+        ],
+        vec![
+            InlineKeyboardButton::callback("Год", "analytics:ai_insights:365"),
+            InlineKeyboardButton::callback("Вся база", "analytics:ai_insights:9999"),
+        ],
+        vec![
+            InlineKeyboardButton::callback("⬅️ Назад", "analytics:menu:main"),
+        ],
+    ])
+}
+
+pub fn analytics_viz_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![
+            InlineKeyboardButton::callback("📅 Календарь", "visual:calendar"),
+            InlineKeyboardButton::callback("🕸 Баланс (Радар)", "visual:radar"),
+        ],
+        vec![
+            InlineKeyboardButton::callback("🌌 Граф Obsidian", "analytics:graph"),
+        ],
+        vec![
+            InlineKeyboardButton::callback("⬅️ Назад", "analytics:menu:main"),
         ],
     ])
 }
 
 /// Вывести меню аналитики
 pub async fn send_analytics_menu(bot: &Bot, chat_id: ChatId) -> anyhow::Result<()> {
-    let text = "📊 <b>Центр Аналитики и Графа знаний</b>\n\n\
-    Выберите период для детального анализа ваших записей, динамики настроения и продуктивности, или просмотрите структуру тегов и связей Obsidian:";
+    let text = "📊 <b>Центр Аналитики и Визуализации</b>\n\n\
+    Выберите раздел:";
     
     bot.send_message(chat_id, text)
         .parse_mode(teloxide::types::ParseMode::Html)
-        .reply_markup(analytics_keyboard())
+        .reply_markup(analytics_main_keyboard())
         .await?;
     Ok(())
 }
@@ -44,50 +86,142 @@ pub async fn handle_analytics_callback(
     analytics_engine: &Arc<brain_analytics::engine::LifeAnalyticsEngine>,
 ) -> anyhow::Result<()> {
     match action {
+        "menu:main" => {
+            let text = "📊 <b>Центр Аналитики и Визуализации</b>\n\nВыберите раздел:";
+            let res = bot.edit_message_text(chat_id, message_id, text)
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .reply_markup(analytics_main_keyboard())
+                .await;
+            if res.is_err() {
+                let _ = bot.delete_message(chat_id, message_id).await;
+                bot.send_message(chat_id, text)
+                    .parse_mode(teloxide::types::ParseMode::Html)
+                    .reply_markup(analytics_main_keyboard())
+                    .await?;
+            }
+        }
+        "menu:stats" => {
+            bot.edit_message_text(chat_id, message_id, "📈 <b>Статистика:</b>\nВыберите период:")
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .reply_markup(analytics_stats_keyboard())
+                .await?;
+        }
+        "menu:ai" => {
+            bot.edit_message_text(chat_id, message_id, "🧠 <b>AI Инсайты:</b>\nВыберите период для анализа:")
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .reply_markup(analytics_ai_keyboard())
+                .await?;
+        }
+        "menu:viz" => {
+            bot.edit_message_text(chat_id, message_id, "🎨 <b>Визуализация:</b>\nВыберите тип:")
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .reply_markup(analytics_viz_keyboard())
+                .await?;
+        }
         "week" => {
             let report = analyze_period(engine, 7).await;
-            bot.edit_message_text(chat_id, message_id, format!("📅 <b>Аналитика за последние 7 дней:</b>\n\n{}", report))
+            bot.edit_message_text(chat_id, message_id, format!("📅 <b>Аналитика за 7 дней:</b>\n\n{}", report))
                 .parse_mode(teloxide::types::ParseMode::Html)
-                .reply_markup(analytics_keyboard())
+                .reply_markup(analytics_stats_keyboard())
                 .await?;
         }
         "month" => {
             let report = analyze_period(engine, 30).await;
-            bot.edit_message_text(chat_id, message_id, format!("🗓 <b>Аналитика за последние 30 дней:</b>\n\n{}", report))
+            bot.edit_message_text(chat_id, message_id, format!("🗓 <b>Аналитика за 30 дней:</b>\n\n{}", report))
                 .parse_mode(teloxide::types::ParseMode::Html)
-                .reply_markup(analytics_keyboard())
+                .reply_markup(analytics_stats_keyboard())
                 .await?;
         }
         "year" => {
             let report = analyze_period(engine, 365).await;
             bot.edit_message_text(chat_id, message_id, format!("🎆 <b>Аналитика за этот год (365 дней):</b>\n\n{}", report))
                 .parse_mode(teloxide::types::ParseMode::Html)
-                .reply_markup(analytics_keyboard())
+                .reply_markup(analytics_stats_keyboard())
                 .await?;
         }
-        "ai_insights" => {
-            bot.edit_message_text(chat_id, message_id, "⏳ Генерирую глубокие AI-инсайты (Event-Sourced Life Analytics)...")
+        "all" => {
+            let report = analyze_period(engine, 9999).await;
+            bot.edit_message_text(chat_id, message_id, format!("♾ <b>Аналитика за всё время:</b>\n\n{}", report))
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .reply_markup(analytics_stats_keyboard())
                 .await?;
+        }
+        "graph" => {
+            let report = analyze_obsidian_graph(engine).await;
+            let text = format!("🕸 <b>Структура Графа Знаний Obsidian:</b>\n\n{}", report);
+            let res = bot.edit_message_text(chat_id, message_id, &text)
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .reply_markup(analytics_viz_keyboard())
+                .await;
+            if res.is_err() {
+                let _ = bot.delete_message(chat_id, message_id).await;
+                bot.send_message(chat_id, text)
+                    .parse_mode(teloxide::types::ParseMode::Html)
+                    .reply_markup(analytics_viz_keyboard())
+                    .await?;
+            }
+        }
+        _ if action.starts_with("ai_insights:") => {
+            let days_str = action.trim_start_matches("ai_insights:");
+            let period_days: usize = days_str.parse().unwrap_or(7);
             
-            let metrics = fetch_diary_metrics(engine, 14).await;
-            match analytics_engine.generate_life_insights(&metrics).await {
+            let today = Local::now().format("%Y-%m-%d").to_string();
+            let title = if period_days == 9999 {
+                format!("AI Insight (All Time) {}", today)
+            } else {
+                format!("AI Insight ({} Days) {}", period_days, today)
+            };
+
+            // 1. Поиск уже сгенерированного инсайта за сегодня
+            if let Ok(results) = engine.search(&title).await {
+                for res in results {
+                    if res.title == title {
+                        // Нашли! Читаем из базы
+                        if let Ok(content) = engine.read_entry(&res.file_path).await {
+                            let header_marker = format!("# {}\n\n", title);
+                            let body = if let Some(idx) = content.find(&header_marker) {
+                                content[idx + header_marker.len()..].trim().to_string()
+                            } else if let Some(idx) = content.find("\n---\n") {
+                                content[idx + 5..].trim().to_string()
+                            } else {
+                                content
+                            };
+                            
+                            bot.edit_message_text(chat_id, message_id, format!("🧠 <b>Сохранённые AI Инсайты за {}:</b>\n\n{}", today, body))
+                                .parse_mode(teloxide::types::ParseMode::Html)
+                                .reply_markup(analytics_ai_keyboard())
+                                .await?;
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+
+            // 2. Если не нашли — генерируем новый
+            let msg_text = if period_days == 9999 {
+                "⏳ Генерирую глубокие AI-инсайты (по всей базе)... Это займет время."
+            } else {
+                "⏳ Генерирую глубокие AI-инсайты (Life Analytics)... Это может занять около минуты."
+            };
+            
+            bot.edit_message_text(chat_id, message_id, msg_text).await?;
+            
+            let metrics = fetch_diary_metrics(engine, period_days as i64).await;
+            match analytics_engine.generate_life_insights(&metrics, period_days).await {
                 Ok(insight_text) => {
+                    // Сохраняем в Vault
+                    let tags = vec!["insight".to_string(), "analytics".to_string()];
+                    let _ = engine.save_direct(&title, &insight_text, "Life", tags).await;
+
                     bot.edit_message_text(chat_id, message_id, format!("🧠 <b>AI Инсайты о вашей жизни:</b>\n\n{}", insight_text))
                         .parse_mode(teloxide::types::ParseMode::Html)
-                        .reply_markup(analytics_keyboard())
+                        .reply_markup(analytics_ai_keyboard())
                         .await?;
                 }
                 Err(e) => {
                     bot.edit_message_text(chat_id, message_id, format!("❌ Ошибка AI: {}", e)).await?;
                 }
             }
-        }
-        "graph" => {
-            let report = analyze_obsidian_graph(engine).await;
-            bot.edit_message_text(chat_id, message_id, format!("🕸 <b>Структура Графа Знаний Obsidian:</b>\n\n{}", report))
-                .parse_mode(teloxide::types::ParseMode::Html)
-                .reply_markup(analytics_keyboard())
-                .await?;
         }
         _ => {}
     }

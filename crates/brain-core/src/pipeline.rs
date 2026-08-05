@@ -67,6 +67,7 @@ impl Pipeline {
             suggested_title,
             suggested_links,
             summary: String::new(),
+            enriched_text: None,
         };
 
         // Шаг 4: Генерация тегов (после остальной классификации)

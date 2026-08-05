@@ -361,8 +361,8 @@ created_by: brain-bot
     md
 }
 
-async fn save_diary_to_vault(metrics: &DiaryMetrics, vault_path: &str) -> anyhow::Result<()> {
-    let daily_dir = std::path::Path::new(vault_path).join("Daily");
+async fn save_diary_to_vault(metrics: &DiaryMetrics, vault_path: &str, daily_folder: &str) -> anyhow::Result<()> {
+    let daily_dir = std::path::Path::new(vault_path).join(daily_folder);
     tokio::fs::create_dir_all(&daily_dir).await?;
 
     let file_path = daily_dir.join(format!("{}.md", metrics.date));
@@ -381,10 +381,11 @@ async fn finish_diary(
     user_id: u64,
     metrics: &DiaryMetrics,
     vault_path: &str,
+    daily_folder: &str,
     state_manager: &StateManager,
 ) -> anyhow::Result<()> {
     // Сохранить в Vault
-    if let Err(e) = save_diary_to_vault(metrics, vault_path).await {
+    if let Err(e) = save_diary_to_vault(metrics, vault_path, daily_folder).await {
         tracing::error!("Failed to save diary: {}", e);
         bot.send_message(chat_id, format!("⚠️ Ошибка сохранения: {}", e)).await?;
     }
@@ -500,7 +501,7 @@ pub async fn handle_diary_callback(
                 track_message(user_id, sent.id.0).await;
             } else if review.is_complete() {
                 let _ = bot.delete_message(chat_id, message_id).await;
-                finish_diary(bot, chat_id, user_id, &review.metrics, &engine.config.vault.path, state_manager).await?;
+                finish_diary(bot, chat_id, user_id, &review.metrics, &engine.config.vault.path, &engine.config.vault.daily_folder, state_manager).await?;
                 return Ok(());
             }
         }
@@ -517,7 +518,7 @@ pub async fn handle_diary_callback(
                 track_message(user_id, sent.id.0).await;
             } else if review.is_complete() {
                 let _ = bot.delete_message(chat_id, message_id).await;
-                finish_diary(bot, chat_id, user_id, &review.metrics, &engine.config.vault.path, state_manager).await?;
+                finish_diary(bot, chat_id, user_id, &review.metrics, &engine.config.vault.path, &engine.config.vault.daily_folder, state_manager).await?;
                 return Ok(());
             }
         }
@@ -552,7 +553,7 @@ pub async fn handle_diary_text(
     review.process_answer(text);
 
     if review.is_complete() {
-        finish_diary(bot, chat_id, user_id, &review.metrics, &engine.config.vault.path, state_manager).await?;
+        finish_diary(bot, chat_id, user_id, &review.metrics, &engine.config.vault.path, &engine.config.vault.daily_folder, state_manager).await?;
     } else {
         let q = metric_question_text(&review.state);
 

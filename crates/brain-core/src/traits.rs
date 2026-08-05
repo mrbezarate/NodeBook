@@ -114,6 +114,25 @@ pub trait RawEventStore: Send + Sync {
     async fn record_metric(&self, name: &str, value: f64, event_id: Option<&str>) -> Result<()>;
     async fn get_metrics_report(&self) -> Result<brain_common::SystemMetricsReport>;
     async fn reset_event_processing(&self, event_id: &str) -> Result<()>;
+    
+    // Event Sourcing
+    async fn append_audit_event(&self, event: &brain_common::SourcingEventRecord) -> Result<()>;
+    async fn load_audit_events(&self, aggregate_id: &str) -> Result<Vec<brain_common::SourcingEventRecord>>;
+    async fn next_unprocessed_event(&self, event_type: &str) -> Result<Option<brain_common::SourcingEventRecord>>;
+    async fn mark_event_processed(&self, event_id: &str) -> Result<()>;
+    
+    // Projections
+    async fn next_unprojected_event_any(&self) -> Result<Option<brain_common::SourcingEventRecord>>;
+    async fn mark_event_projected(&self, event_id: &str) -> Result<()>;
+    async fn load_projection(&self, id: &str) -> Result<Option<brain_common::ProjectionEntry>>;
+    async fn save_projection(&self, entry: &brain_common::ProjectionEntry) -> Result<()>;
+    
+    // Graph
+    async fn find_by_tag(&self, tag: &str) -> Result<Vec<String>>;
+    async fn create_link(&self, from_id: &str, to_id: &str) -> Result<()>;
+    async fn get_links(&self, id: &str) -> Result<Vec<String>>;
+    async fn get_links_with_weights(&self, id: &str) -> Result<Vec<(String, f32)>>;
+    async fn get_links_with_weights_batch(&self, ids: &[String]) -> Result<Vec<(String, String, f32)>>;
 }
 
 /// Позволяет найти существующую сущность по имени/алиасу.
@@ -163,6 +182,7 @@ pub trait EmbeddingProvider: Send + Sync {
 pub trait VectorStorage: Send + Sync {
     async fn upsert(&self, entry_id: &str, vector: Vec<f32>) -> Result<()>;
     async fn search(&self, query_vector: &[f32], limit: usize) -> Result<Vec<(String, f32)>>;
+    async fn get(&self, entry_id: &str) -> Result<Option<Vec<f32>>>;
     async fn save(&self) -> Result<()>;
 }
 
@@ -189,6 +209,10 @@ pub trait VaultStorage: Send + Sync {
     async fn search_by_text(&self, query: &str) -> Result<Vec<SearchResult>>;
     /// Проверить существование файла.
     async fn entry_exists(&self, title: &str) -> Result<bool>;
+    /// Удалить файл записи.
+    async fn delete_entry(&self, entry_id: &str) -> Result<()>;
+    /// Дополнить файл.
+    async fn append_to_entry(&self, entry_id: &str, text: &str) -> Result<()>;
 }
 
 /// Операции с графом знаний.

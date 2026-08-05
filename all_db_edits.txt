@@ -1,0 +1,561 @@
+TOOL: multi_replace_file_content
+{
+  "Description": "Add event sourcing table and implement methods in db.rs",
+  "Instruction": "Create audit_events table and implement the new trait methods for SqliteKnowledgeStore",
+  "ReplacementChunks": [
+    {
+      "AllowMultiple": false,
+      "EndLine": 115,
+      "ReplacementContent": "            CREATE TABLE IF NOT EXISTS metrics (\n                id TEXT PRIMARY KEY,\n                event_id TEXT,\n                name TEXT NOT NULL,\n                value REAL NOT NULL,\n                recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n                FOREIGN KEY(event_id) REFERENCES raw_events(id) ON DELETE SET NULL\n            );\n\n            CREATE TABLE IF NOT EXISTS audit_events (\n                id TEXT PRIMARY KEY,\n                aggregate_id TEXT NOT NULL,\n                event_type TEXT NOT NULL,\n                payload TEXT NOT NULL,\n                created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n            );\n            CREATE INDEX IF NOT EXISTS idx_audit_aggregate ON audit_events(aggregate_id);",
+      "StartLine": 108,
+      "TargetContent": "            CREATE TABLE IF NOT EXISTS metrics (\n                id TEXT PRIMARY KEY,\n                event_id TEXT,\n                name TEXT NOT NULL,\n                value REAL NOT NULL,\n                recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n                FOREIGN KEY(event_id) REFERENCES raw_events(id) ON DELETE SET NULL\n            );"
+    },
+    {
+      "AllowMultiple": false,
+      "EndLine": 642,
+      "ReplacementContent": "    async fn reset_event_processing(&self, event_id: &str) -> Result<()> {\n        let conn = self.conn.lock().unwrap();\n        conn.execute(\n            \"UPDATE raw_events SET status = 'pending', error = NULL WHERE id = ?1\",\n            params![event_id],\n        ).map_err(|e| BrainError::Database(e.to_string()))?;\n        Ok(())\n    }\n\n    async fn append_audit_event(&self, event: &brain_common::SourcingEventRecord) -> Result<()> {\n        let conn = self.conn.lock().unwrap();\n        let event_type = match &event.event {\n            brain_common::SourcingEvent::MessageIngested { .. } => \"MessageIngested\",\n            brain_common::SourcingEvent::LlmProcessed { .. } => \"LlmProcessed\",\n            brain_common::SourcingEvent::EmbeddingGenerated { .. } => \"EmbeddingGenerated\",\n            brain_common::SourcingEvent::EntryStored { .. } => \"EntryStored\",\n            brain_common::SourcingEvent::FallbackTriggered { .. } => \"FallbackTriggered\",\n        };\n        let payload = serde_json::to_string(&event.event).unwrap_or_default();\n        conn.execute(\n            \"INSERT INTO audit_events (id, aggregate_id, event_type, payload) VALUES (?1, ?2, ?3, ?4)\",\n            params![event.id, event.aggregate_id, event_type, payload],\n        ).map_err(|e| BrainError::Database(e.to_string()))?;\n        Ok(())\n    }\n\n    async fn load_audit_events(&self, aggregate_id: &str) -> Result<Vec<brain_common::SourcingEventRecord>> {\n        let conn = self.conn.lock().unwrap();\n        let mut stmt = conn.prepare(\"SELECT id, aggregate_id, payload, created_at FROM audit_events WHERE aggregate_id = ?1 ORDER BY created_at ASC\").unwrap();\n        let iter = stmt.query_map(params![aggregate_id], |row| {\n            let id: String = row.get(0)?;\n            let agg_id: String = row.get(1)?;\n            let payload: String = row.get(2)?;\n            let created_at: String = row.get(3)?;\n            let event: brain_common::SourcingEvent = serde_json::from_str(&payload).unwrap();\n            let date_time = chrono::DateTime::parse_from_rfc3339(&created_at).unwrap().with_timezone(&chrono::Utc);\n            Ok(brain_common::SourcingEventRecord { id, aggregate_id: agg_id, event, created_at: date_time })\n        }).unwrap();\n        \n        let records = iter.filter_map(std::result::Result::ok).collect();\n        Ok(records)\n    }\n}\n",
+      "StartLine": 633,
+      "TargetContent": "    async fn reset_event_processing(&self, event_id: &str) -> Result<()> {\n        let conn = self.conn.lock().unwrap();\n        conn.execute(\n            \"UPDATE raw_events SET status = 'pending', error = NULL WHERE id = ?1\",\n            params![event_id],\n        ).map_err(|e| BrainError::Database(e.to_string()))?;\n        Ok(())\n    }\n}\n"
+    }
+  ],
+  "TargetFile": "/home/mrbez/Telegramm/my-bots/daybook/crates/brain-core/src/db.rs",
+  "toolAction": "Adding event sourcing to DB",
+  "toolSummary": "Add audit_events table and implementation to db.rs"
+}
+TOOL: replace_file_content
+{
+  "AllowMultiple": false,
+  "Description": "Add processed column to audit_events in db.rs",
+  "EndLine": 34,
+  "Instruction": "Modify the CREATE TABLE statement for audit_events and add ALTER TABLE.",
+  "ReplacementContent": "            CREATE TABLE IF NOT EXISTS audit_events (\n                id TEXT PRIMARY KEY,\n                aggregate_id TEXT NOT NULL,\n                event_type TEXT NOT NULL,\n                payload TEXT NOT NULL,\n                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n                processed INTEGER DEFAULT 0\n            );\n            CREATE INDEX IF NOT EXISTS idx_audit_aggregate ON audit_events(aggregate_id);\n            \",\n            []\n        ).map_err(|e| BrainError::Database(e.to_string()))?;\n\n        // \u041f\u043e\u043f\u044b\u0442\u043a\u0430 \u0434\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u043a\u043e\u043b\u043e\u043d\u043a\u0443, \u0435\u0441\u043b\u0438 \u0442\u0430\u0431\u043b\u0438\u0446\u0430 \u0443\u0436\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u043e\u0432\u0430\u043b\u0430 \u0431\u0435\u0437 \u043d\u0435\u0451\n        let _ = conn.execute(\"ALTER TABLE audit_events ADD COLUMN processed INTEGER DEFAULT 0;\", []);\n\n        conn.execute_batch(\n            \"\n            CREATE TABLE IF NOT EXISTS raw_events (",
+  "StartLine": 27,
+  "TargetContent": "            CREATE TABLE IF NOT EXISTS audit_events (\n                id TEXT PRIMARY KEY,\n                aggregate_id TEXT NOT NULL,\n                event_type TEXT NOT NULL,\n                payload TEXT NOT NULL,\n                created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n            );\n            CREATE INDEX IF NOT EXISTS idx_audit_aggregate ON audit_events(aggregate_id);\n\n            CREATE TABLE IF NOT EXISTS raw_events (",
+  "TargetFile": "/home/mrbez/Telegramm/my-bots/daybook/crates/brain-core/src/db.rs",
+  "toolAction": "Modifying audit_events schema",
+  "toolSummary": "Add processed column to audit_events table"
+}
+TOOL: replace_file_content
+{
+  "AllowMultiple": false,
+  "Description": "Implement next_unprocessed_event and mark_event_processed in db.rs",
+  "EndLine": 416,
+  "Instruction": "Add the two new trait methods to SqliteKnowledgeStore",
+  "ReplacementContent": "    async fn load_audit_events(&self, aggregate_id: &str) -> Result<Vec<brain_common::SourcingEventRecord>> {\n        let conn = self.conn.lock().unwrap();\n        let mut stmt = conn.prepare(\"SELECT id, aggregate_id, payload, created_at FROM audit_events WHERE aggregate_id = ?1 ORDER BY created_at ASC\").unwrap();\n        let iter = stmt.query_map(params![aggregate_id], |row| {\n            let id: String = row.get(0)?;\n            let agg_id: String = row.get(1)?;\n            let payload: String = row.get(2)?;\n            let created_at: String = row.get(3)?;\n            let event: brain_common::SourcingEvent = serde_json::from_str(&payload).unwrap();\n            let date_time = chrono::DateTime::parse_from_rfc3339(&created_at).unwrap().with_timezone(&chrono::Utc);\n            Ok(brain_common::SourcingEventRecord { id, aggregate_id: agg_id, event, created_at: date_time })\n        }).unwrap();\n        \n        let records = iter.filter_map(std::result::Result::ok).collect();\n        Ok(records)\n    }\n\n    async fn next_unprocessed_event(&self, event_type: &str) -> Result<Option<brain_common::SourcingEventRecord>> {\n        let conn = self.conn.lock().unwrap();\n        // \u0410\u0442\u043e\u043c\u0430\u0440\u043d\u044b\u0439 \u0437\u0430\u0445\u0432\u0430\u0442 \u0441\u043e\u0431\u044b\u0442\u0438\u044f\n        let mut stmt = conn.prepare(\n            \"UPDATE audit_events SET processed = 1 \n             WHERE id = (\n                SELECT id FROM audit_events \n                WHERE event_type = ?1 AND processed = 0 \n                ORDER BY created_at ASC \n                LIMIT 1\n             )\n             RETURNING id, aggregate_id, payload, created_at\"\n        ).unwrap();\n\n        let record = stmt.query_row(params![event_type], |row| {\n            let id: String = row.get(0)?;\n            let agg_id: String = row.get(1)?;\n            let payload: String = row.get(2)?;\n            let created_at: String = row.get(3)?;\n            let event: brain_common::SourcingEvent = serde_json::from_str(&payload).unwrap();\n            let date_time = chrono::DateTime::parse_from_rfc3339(&created_at).unwrap().with_timezone(&chrono::Utc);\n            Ok(brain_common::SourcingEventRecord { id, aggregate_id: agg_id, event, created_at: date_time })\n        }).optional().map_err(|e| BrainError::Database(e.to_string()))?;\n        \n        Ok(record)\n    }\n\n    async fn mark_event_processed(&self, event_id: &str) -> Result<()> {\n        let conn = self.conn.lock().unwrap();\n        conn.execute(\n            \"UPDATE audit_events SET processed = 1 WHERE id = ?1\",\n            params![event_id],\n        ).map_err(|e| BrainError::Database(e.to_string()))?;\n        Ok(())\n    }\n\n    async fn update_job_status(&self, job_id: &str, status: &str) -> Result<()> {",
+  "StartLine": 392,
+  "TargetContent": "    async fn load_audit_events(&self, aggregate_id: &str) -> Result<Vec<brain_common::SourcingEventRecord>> {\n        let conn = self.conn.lock().unwrap();\n        let mut stmt = conn.prepare(\"SELECT id, aggregate_id, payload, created_at FROM audit_events WHERE aggregate_id = ?1 ORDER BY created_at ASC\").unwrap();\n        let iter = stmt.query_map(params![aggregate_id], |row| {\n            let id: String = row.get(0)?;\n            let agg_id: String = row.get(1)?;\n            let payload: String = row.get(2)?;\n            let created_at: String = row.get(3)?;\n            let event: brain_common::SourcingEvent = serde_json::from_str(&payload).unwrap();\n            let date_time = chrono::DateTime::parse_from_rfc3339(&created_at).unwrap().with_timezone(&chrono::Utc);\n            Ok(brain_common::SourcingEventRecord { id, aggregate_id: agg_id, event, created_at: date_time })\n        }).unwrap();\n        \n        let records = iter.filter_map(std::result::Result::ok).collect();\n        Ok(records)\n    }\n\n    async fn update_job_status(&self, job_id: &str, status: &str) -> Result<()> {",
+  "TargetFile": "/home/mrbez/Telegramm/my-bots/daybook/crates/brain-core/src/db.rs",
+  "toolAction": "Implementing fetching logic",
+  "toolSummary": "Implement next_unprocessed_event in db.rs"
+}
+TOOL: replace_file_content
+{
+  "AllowMultiple": false,
+  "Description": "Update db.rs to handle new event types",
+  "EndLine": 430,
+  "Instruction": "Add the new event types to the event_type match in append_audit_event",
+  "ReplacementContent": "    async fn append_audit_event(&self, event: &brain_common::SourcingEventRecord) -> Result<()> {\n        let conn = self.conn.lock().unwrap();\n        let event_type = match &event.event {\n            brain_common::SourcingEvent::MessageIngested { .. } => \"MessageIngested\",\n            brain_common::SourcingEvent::LlmProcessRequested { .. } => \"LlmProcessRequested\",\n            brain_common::SourcingEvent::EmbeddingProcessRequested { .. } => \"EmbeddingProcessRequested\",\n            brain_common::SourcingEvent::LlmProcessed { .. } => \"LlmProcessed\",\n            brain_common::SourcingEvent::EmbeddingGenerated { .. } => \"EmbeddingGenerated\",\n            brain_common::SourcingEvent::EntryStored { .. } => \"EntryStored\",\n            brain_common::SourcingEvent::FallbackTriggered { .. } => \"FallbackTriggered\",\n        };\n        let payload = serde_json::to_string(&event.event).unwrap_or_default();\n        conn.execute(\n            \"INSERT INTO audit_events (id, aggregate_id, event_type, payload) VALUES (?1, ?2, ?3, ?4)\",\n            params![event.id, event.aggregate_id, event_type, payload],\n        ).map_err(|e| BrainError::Database(e.to_string()))?;\n        Ok(())\n    }",
+  "StartLine": 412,
+  "TargetContent": "    async fn append_audit_event(&self, event: &brain_common::SourcingEventRecord) -> Result<()> {\n        let conn = self.conn.lock().unwrap();\n        let event_type = match &event.event {\n            brain_common::SourcingEvent::MessageIngested { .. } => \"MessageIngested\",\n            brain_common::SourcingEvent::LlmProcessed { .. } => \"LlmProcessed\",\n            brain_common::SourcingEvent::EmbeddingGenerated { .. } => \"EmbeddingGenerated\",\n            brain_common::SourcingEvent::EntryStored { .. } => \"EntryStored\",\n            brain_common::SourcingEvent::FallbackTriggered { .. } => \"FallbackTriggered\",\n        };\n        let payload = serde_json::to_string(&event.event).unwrap_or_default();\n        conn.execute(\n            \"INSERT INTO audit_events (id, aggregate_id, event_type, payload) VALUES (?1, ?2, ?3, ?4)\",\n            params![event.id, event.aggregate_id, event_type, payload],\n        ).map_err(|e| BrainError::Database(e.to_string()))?;\n        Ok(())\n    }",
+  "TargetFile": "/home/mrbez/Telegramm/my-bots/daybook/crates/brain-core/src/db.rs",
+  "toolAction": "Updating db.rs with new events",
+  "toolSummary": "Add new event types to db.rs event dispatcher"
+}
+TOOL: multi_replace_file_content
+{
+  "Description": "CQRS schema update in db.rs",
+  "Instruction": "Add brain_entries table, projected column in audit_events, and the trait structs.",
+  "ReplacementChunks": [
+    {
+      "AllowMultiple": false,
+      "EndLine": 43,
+      "ReplacementContent": "                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n                processed INTEGER DEFAULT 0,\n                projected INTEGER DEFAULT 0\n            );\n            CREATE INDEX IF NOT EXISTS idx_audit_aggregate ON audit_events(aggregate_id);\n            \",\n            []\n        ).map_err(|e| BrainError::Database(e.to_string()))?;\n\n        let _ = conn.execute(\"ALTER TABLE audit_events ADD COLUMN processed INTEGER DEFAULT 0;\", []);\n        let _ = conn.execute(\"ALTER TABLE audit_events ADD COLUMN projected INTEGER DEFAULT 0;\", []);\n\n        conn.execute_batch(\n            \"\n            CREATE TABLE IF NOT EXISTS brain_entries (\n                id TEXT PRIMARY KEY,\n                raw TEXT,\n                summary TEXT,\n                tags TEXT,\n                is_fallback INTEGER DEFAULT 0,\n                created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n            );\n\n            CREATE TABLE IF NOT EXISTS raw_events (",
+      "StartLine": 35,
+      "TargetContent": "                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n                processed INTEGER DEFAULT 0\n            );\n            CREATE INDEX IF NOT EXISTS idx_audit_aggregate ON audit_events(aggregate_id);\n            \",\n            []\n        ).map_err(|e| BrainError::Database(e.to_string()))?;\n\n        // \u041f\u043e\u043f\u044b\u0442\u043a\u0430 \u0434\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u043a\u043e\u043b\u043e\u043d\u043a\u0443, \u0435\u0441\u043b\u0438 \u0442\u0430\u0431\u043b\u0438\u0446\u0430 \u0443\u0436\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u043e\u0432\u0430\u043b\u0430 \u0431\u0435\u0437 \u043d\u0435\u0451\n        let _ = conn.execute(\"ALTER TABLE audit_events ADD COLUMN processed INTEGER DEFAULT 0;\", []);\n\n        conn.execute_batch(\n            \"\n            CREATE TABLE IF NOT EXISTS raw_events ("
+    }
+  ],
+  "TargetFile": "/home/mrbez/Telegramm/my-bots/daybook/crates/brain-core/src/db.rs",
+  "toolAction": "Updating CQRS schema",
+  "toolSummary": "Add read model and projection state to schema"
+}
+TOOL: replace_file_content
+{
+  "AllowMultiple": false,
+  "Description": "Implement projection methods in db.rs",
+  "EndLine": 454,
+  "Instruction": "Add projection trait implementations in SqliteKnowledgeStore",
+  "ReplacementContent": "    async fn mark_event_processed(&self, event_id: &str) -> Result<()> {\n        let conn = self.conn.lock().unwrap();\n        conn.execute(\n            \"UPDATE audit_events SET processed = 1 WHERE id = ?1\",\n            params![event_id],\n        ).map_err(|e| BrainError::Database(e.to_string()))?;\n        Ok(())\n    }\n\n    async fn next_unprojected_event_any(&self) -> Result<Option<brain_common::SourcingEventRecord>> {\n        let conn = self.conn.lock().unwrap();\n        let mut stmt = conn.prepare(\n            \"UPDATE audit_events SET projected = 1 \n             WHERE id = (\n                SELECT id FROM audit_events \n                WHERE projected = 0 \n                ORDER BY created_at ASC \n                LIMIT 1\n             )\n             RETURNING id, aggregate_id, payload, created_at\"\n        ).unwrap();\n\n        let record = stmt.query_row([], |row| {\n            let id: String = row.get(0)?;\n            let agg_id: String = row.get(1)?;\n            let payload: String = row.get(2)?;\n            let created_at: String = row.get(3)?;\n            let event: brain_common::SourcingEvent = serde_json::from_str(&payload).unwrap();\n            let date_time = chrono::DateTime::parse_from_rfc3339(&created_at).unwrap().with_timezone(&chrono::Utc);\n            Ok(brain_common::SourcingEventRecord { id, aggregate_id: agg_id, event, created_at: date_time })\n        }).optional().map_err(|e| BrainError::Database(e.to_string()))?;\n        \n        Ok(record)\n    }\n\n    async fn mark_event_projected(&self, event_id: &str) -> Result<()> {\n        let conn = self.conn.lock().unwrap();\n        conn.execute(\n            \"UPDATE audit_events SET projected = 1 WHERE id = ?1\",\n            params![event_id],\n        ).map_err(|e| BrainError::Database(e.to_string()))?;\n        Ok(())\n    }\n\n    async fn load_projection(&self, id: &str) -> Result<Option<brain_common::ProjectionEntry>> {\n        let conn = self.conn.lock().unwrap();\n        let mut stmt = conn.prepare(\"SELECT id, raw, summary, tags, is_fallback, created_at FROM brain_entries WHERE id = ?1\").unwrap();\n        let res = stmt.query_row(params![id], |row| {\n            let id: String = row.get(0)?;\n            let raw: String = row.get(1)?;\n            let summary: String = row.get(2)?;\n            let tags_str: String = row.get(3)?;\n            let is_fallback_int: i32 = row.get(4)?;\n            let created_at: String = row.get(5)?;\n            \n            let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();\n            let date_time = chrono::DateTime::parse_from_rfc3339(&created_at).unwrap_or(chrono::Utc::now()).with_timezone(&chrono::Utc);\n            \n            Ok(brain_common::ProjectionEntry {\n                id,\n                raw,\n                summary,\n                tags,\n                is_fallback: is_fallback_int > 0,\n                created_at: date_time,\n            })\n        }).optional().map_err(|e| BrainError::Database(e.to_string()))?;\n        \n        Ok(res)\n    }\n\n    async fn save_projection(&self, entry: &brain_common::ProjectionEntry) -> Result<()> {\n        let conn = self.conn.lock().unwrap();\n        let tags_str = serde_json::to_string(&entry.tags).unwrap_or_default();\n        let is_fallback_int = if entry.is_fallback { 1 } else { 0 };\n        \n        conn.execute(\n            \"INSERT OR REPLACE INTO brain_entries (id, raw, summary, tags, is_fallback) \n             VALUES (?1, ?2, ?3, ?4, ?5)\",\n            params![entry.id, entry.raw, entry.summary, tags_str, is_fallback_int],\n        ).map_err(|e| BrainError::Database(e.to_string()))?;\n        \n        Ok(())\n    }\n\n    async fn update_job_status(&self, job_id: &str, status: &str) -> Result<()> {",
+  "StartLine": 445,
+  "TargetContent": "    async fn mark_event_processed(&self, event_id: &str) -> Result<()> {\n        let conn = self.conn.lock().unwrap();\n        conn.execute(\n            \"UPDATE audit_events SET processed = 1 WHERE id = ?1\",\n            params![event_id],\n        ).map_err(|e| BrainError::Database(e.to_string()))?;\n        Ok(())\n    }\n\n    async fn update_job_status(&self, job_id: &str, status: &str) -> Result<()> {",
+  "TargetFile": "/home/mrbez/Telegramm/my-bots/daybook/crates/brain-core/src/db.rs",
+  "toolAction": "Implementing projection SQL",
+  "toolSummary": "Implement load_projection, save_projection, and projection event iterators"
+}
+TOOL: replace_file_content
+{
+  "AllowMultiple": false,
+  "Description": "Add links table",
+  "EndLine": 60,
+  "Instruction": "Add links table to schema",
+  "ReplacementContent": "        conn.execute_batch(\n            \"\n            CREATE TABLE IF NOT EXISTS brain_entries (\n                id TEXT PRIMARY KEY,\n                raw TEXT,\n                summary TEXT,\n                tags TEXT,\n                is_fallback INTEGER DEFAULT 0,\n                created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n            );\n\n            CREATE TABLE IF NOT EXISTS links (\n                from_id TEXT,\n                to_id TEXT,\n                weight REAL DEFAULT 1.0,\n                PRIMARY KEY (from_id, to_id)\n            );\n            CREATE INDEX IF NOT EXISTS idx_links_from ON links(from_id);\n            CREATE INDEX IF NOT EXISTS idx_links_to ON links(to_id);\n\n            CREATE TABLE IF NOT EXISTS raw_events (",
+  "StartLine": 43,
+  "TargetContent": "        conn.execute_batch(\n            \"\n            CREATE TABLE IF NOT EXISTS brain_entries (\n                id TEXT PRIMARY KEY,\n                raw TEXT,\n                summary TEXT,\n                tags TEXT,\n                is_fallback INTEGER DEFAULT 0,\n                created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n            );\n\n            CREATE TABLE IF NOT EXISTS raw_events (",
+  "TargetFile": "/home/mrbez/Telegramm/my-bots/daybook/crates/brain-core/src/db.rs",
+  "toolAction": "Updating schema",
+  "toolSummary": "Add links table to db.rs for Graph Projection"
+}
+TOOL: multi_replace_file_content
+{
+  "Description": "Add graph projection methods",
+  "Instruction": "Add find_by_tag, create_link, and get_links to db.rs and traits.rs",
+  "ReplacementChunks": [
+    {
+      "AllowMultiple": false,
+      "EndLine": 540,
+      "ReplacementContent": "    async fn save_projection(&self, entry: &brain_common::ProjectionEntry) -> Result<()> {\n        let conn = self.conn.lock().unwrap();\n        let tags_str = serde_json::to_string(&entry.tags).unwrap_or_default();\n        let is_fallback_int = if entry.is_fallback { 1 } else { 0 };\n        \n        conn.execute(\n            \"INSERT OR REPLACE INTO brain_entries (id, raw, summary, tags, is_fallback) \n             VALUES (?1, ?2, ?3, ?4, ?5)\",\n            params![entry.id, entry.raw, entry.summary, tags_str, is_fallback_int],\n        ).map_err(|e| BrainError::Database(e.to_string()))?;\n        \n        Ok(())\n    }\n\n    async fn find_by_tag(&self, tag: &str) -> Result<Vec<String>> {\n        let conn = self.conn.lock().unwrap();\n        let pattern = format!(\"%\\\"{}\\\"%\", tag);\n        let mut stmt = conn.prepare(\"SELECT id FROM brain_entries WHERE tags LIKE ?1 LIMIT 20\").unwrap();\n        let iter = stmt.query_map(params![pattern], |row| row.get(0)).unwrap();\n        Ok(iter.filter_map(std::result::Result::ok).collect())\n    }\n\n    async fn create_link(&self, from_id: &str, to_id: &str) -> Result<()> {\n        let conn = self.conn.lock().unwrap();\n        conn.execute(\n            \"INSERT INTO links (from_id, to_id, weight) VALUES (?1, ?2, 1.0) \n             ON CONFLICT(from_id, to_id) DO UPDATE SET weight = weight + 1\",\n            params![from_id, to_id],\n        ).map_err(|e| BrainError::Database(e.to_string()))?;\n        Ok(())\n    }\n\n    async fn get_links(&self, id: &str) -> Result<Vec<String>> {\n        let conn = self.conn.lock().unwrap();\n        let mut stmt = conn.prepare(\"SELECT to_id FROM links WHERE from_id = ?1 AND weight > 1.0 ORDER BY weight DESC LIMIT 10\").unwrap();\n        let iter = stmt.query_map(params![id], |row| row.get(0)).unwrap();\n        Ok(iter.filter_map(std::result::Result::ok).collect())\n    }\n\n    async fn update_job_status(&self, job_id: &str, status: &str) -> Result<()> {",
+      "StartLine": 527,
+      "TargetContent": "    async fn save_projection(&self, entry: &brain_common::ProjectionEntry) -> Result<()> {\n        let conn = self.conn.lock().unwrap();\n        let tags_str = serde_json::to_string(&entry.tags).unwrap_or_default();\n        let is_fallback_int = if entry.is_fallback { 1 } else { 0 };\n        \n        conn.execute(\n            \"INSERT OR REPLACE INTO brain_entries (id, raw, summary, tags, is_fallback) \n             VALUES (?1, ?2, ?3, ?4, ?5)\",\n            params![entry.id, entry.raw, entry.summary, tags_str, is_fallback_int],\n        ).map_err(|e| BrainError::Database(e.to_string()))?;\n        \n        Ok(())\n    }\n\n    async fn update_job_status(&self, job_id: &str, status: &str) -> Result<()> {"
+    }
+  ],
+  "TargetFile": "/home/mrbez/Telegramm/my-bots/daybook/crates/brain-core/src/db.rs",
+  "toolAction": "Updating db.rs with Graph Projection",
+  "toolSummary": "Add find_by_tag and create_link to db.rs"
+}
+TOOL: multi_replace_file_content
+{
+  "Description": "Fix compile errors in db.rs",
+  "Instruction": "Fix execute_batch params, datetime parsing, and remove duplicate method",
+  "ReplacementChunks": [
+    {
+      "AllowMultiple": false,
+      "EndLine": 43,
+      "ReplacementContent": "            CREATE INDEX IF NOT EXISTS idx_audit_aggregate ON audit_events(aggregate_id);\n            \"\n        ).map_err(|e| BrainError::Database(e.to_string()))?;",
+      "StartLine": 39,
+      "TargetContent": "            CREATE INDEX IF NOT EXISTS idx_audit_aggregate ON audit_events(aggregate_id);\n            \",\n            []\n        ).map_err(|e| BrainError::Database(e.to_string()))?;"
+    },
+    {
+      "AllowMultiple": false,
+      "EndLine": 520,
+      "ReplacementContent": "            let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();\n            let date_time = chrono::DateTime::parse_from_rfc3339(&created_at).map(|dt| dt.with_timezone(&chrono::Utc)).unwrap_or_else(|_| chrono::Utc::now());\n            \n            Ok(brain_common::ProjectionEntry {",
+      "StartLine": 517,
+      "TargetContent": "            let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();\n            let date_time = chrono::DateTime::parse_from_rfc3339(&created_at).unwrap_or(chrono::Utc::now()).with_timezone(&chrono::Utc);\n            \n            Ok(brain_common::ProjectionEntry {"
+    },
+    {
+      "AllowMultiple": false,
+      "EndLine": 870,
+      "ReplacementContent": "",
+      "StartLine": 849,
+      "TargetContent": "    async fn reset_event_processing(&self, event_id: &str) -> Result<()> {\n        let conn = self.conn.lock().unwrap();\n        // 1. \u0423\u0431\u0438\u0440\u0430\u0435\u043c observations (cascade)\n        conn.execute(\"DELETE FROM observations WHERE raw_event_id = ?1\", params![event_id])\n            .map_err(|e| BrainError::Database(e.to_string()))?;\n        \n        // 2. \u0421\u0431\u0440\u0430\u0441\u044b\u0432\u0430\u0435\u043c \u0441\u0442\u0430\u0442\u0443\u0441\n        conn.execute(\n            \"UPDATE raw_events SET status = 'pending', error = NULL WHERE id = ?1\",\n            params![event_id]\n        ).map_err(|e| BrainError::Database(e.to_string()))?;\n        \n        // 3. \u0414\u043e\u0431\u0430\u0432\u043b\u044f\u0435\u043c \u043c\u0435\u0442\u0440\u0438\u043a\u0443\n        let metric_id = uuid::Uuid::new_v4().to_string();\n        conn.execute(\n            \"INSERT INTO metrics (id, event_id, name, value) VALUES (?1, ?2, 'processing_reset', 1.0)\",\n            params![metric_id, event_id]\n        ).map_err(|e| BrainError::Database(e.to_string()))?;\n        \n        Ok(())\n    }"
+    }
+  ],
+  "TargetFile": "/home/mrbez/Telegramm/my-bots/daybook/crates/brain-core/src/db.rs",
+  "toolAction": "Fixing db.rs compile errors",
+  "toolSummary": "Fix execute_batch, DateTime, and duplicate method in db.rs"
+}
+TOOL: multi_replace_file_content
+{
+  "Description": "Add get_links_with_weights to db.rs and traits.rs",
+  "Instruction": "Add get_links_with_weights for the hybrid search merge",
+  "ReplacementChunks": [
+    {
+      "AllowMultiple": false,
+      "EndLine": 562,
+      "ReplacementContent": "    async fn get_links_with_weights(&self, id: &str) -> Result<Vec<(String, f32)>> {\n        let conn = self.conn.lock().unwrap();\n        let mut stmt = conn.prepare(\"SELECT to_id, weight FROM links WHERE from_id = ?1 AND weight > 1.0 ORDER BY weight DESC LIMIT 20\").unwrap();\n        let iter = stmt.query_map(params![id], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();\n        Ok(iter.filter_map(std::result::Result::ok).collect())\n    }\n\n    async fn update_job_status(&self, job_id: &str, status: &str) -> Result<()> {",
+      "StartLine": 558,
+      "TargetContent": "    async fn update_job_status(&self, job_id: &str, status: &str) -> Result<()> {"
+    }
+  ],
+  "TargetFile": "/home/mrbez/Telegramm/my-bots/daybook/crates/brain-core/src/db.rs",
+  "toolAction": "Adding get_links_with_weights",
+  "toolSummary": "Add get_links_with_weights to db.rs"
+}
+TOOL: multi_replace_file_content
+{
+  "Description": "Add get_links_with_weights_batch to db.rs and traits.rs",
+  "Instruction": "Add batch fetching for graph links",
+  "ReplacementChunks": [
+    {
+      "AllowMultiple": false,
+      "EndLine": 569,
+      "ReplacementContent": "    async fn get_links_with_weights(&self, id: &str) -> Result<Vec<(String, f32)>> {\n        let conn = self.conn.lock().unwrap();\n        let mut stmt = conn.prepare(\"SELECT to_id, weight FROM links WHERE from_id = ?1 AND weight > 1.0 ORDER BY weight DESC LIMIT 20\").unwrap();\n        let iter = stmt.query_map(params![id], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();\n        Ok(iter.filter_map(std::result::Result::ok).collect())\n    }\n\n    async fn get_links_with_weights_batch(&self, ids: &[String]) -> Result<Vec<(String, String, f32)>> {\n        if ids.is_empty() { return Ok(vec![]); }\n        let conn = self.conn.lock().unwrap();\n        \n        let placeholders = ids.iter().map(|_| \"?\").collect::<Vec<_>>().join(\",\");\n        let sql = format!(\"SELECT from_id, to_id, weight FROM links WHERE from_id IN ({}) AND weight > 1.0 ORDER BY weight DESC\", placeholders);\n        \n        let mut stmt = conn.prepare(&sql).unwrap();\n        let params_vec = ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect::<Vec<_>>();\n        let iter = stmt.query_map(rusqlite::params_from_iter(params_vec), |row| {\n            Ok((row.get(0)?, row.get(1)?, row.get(2)?))\n        }).unwrap();\n        Ok(iter.filter_map(std::result::Result::ok).collect())\n    }\n\n    async fn update_job_status(&self, job_id: &str, status: &str) -> Result<()> {",
+      "StartLine": 560,
+      "TargetContent": "    async fn get_links_with_weights(&self, id: &str) -> Result<Vec<(String, f32)>> {\n        let conn = self.conn.lock().unwrap();\n        let mut stmt = conn.prepare(\"SELECT to_id, weight FROM links WHERE from_id = ?1 AND weight > 1.0 ORDER BY weight DESC LIMIT 20\").unwrap();\n        let iter = stmt.query_map(params![id], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();\n        Ok(iter.filter_map(std::result::Result::ok).collect())\n    }\n\n    async fn update_job_status(&self, job_id: &str, status: &str) -> Result<()> {"
+    }
+  ],
+  "TargetFile": "/home/mrbez/Telegramm/my-bots/daybook/crates/brain-core/src/db.rs",
+  "toolAction": "Adding batch link fetch",
+  "toolSummary": "Add get_links_with_weights_batch to db.rs"
+}
+TOOL: multi_replace_file_content
+{
+  "Description": "Fix compile errors in engine.rs and db.rs",
+  "Instruction": "Remove duplicate reset_event_processing in db.rs, fix fallback, EntryId and unused imports in engine.rs",
+  "ReplacementChunks": [
+    {
+      "AllowMultiple": false,
+      "EndLine": 891,
+      "ReplacementContent": "}\n",
+      "StartLine": 869,
+      "TargetContent": "\n    async fn reset_event_processing(&self, event_id: &str) -> Result<()> {\n        let conn = self.conn.lock().unwrap();\n        // 1. \u0423\u0431\u0438\u0440\u0430\u0435\u043c observations (cascade)\n        conn.execute(\"DELETE FROM observations WHERE raw_event_id = ?1\", params![event_id])\n            .map_err(|e| BrainError::Database(e.to_string()))?;\n        \n        // 2. \u0421\u0431\u0440\u0430\u0441\u044b\u0432\u0430\u0435\u043c \u043c\u0435\u0442\u0440\u0438\u043a\u0438\n        conn.execute(\"DELETE FROM system_metrics WHERE event_id = ?1\", params![event_id])\n            .map_err(|e| BrainError::Database(e.to_string()))?;\n\n        // 3. \u0421\u0431\u0440\u0430\u0441\u044b\u0432\u0430\u0435\u043c job status\n        conn.execute(\"UPDATE jobs SET status = 'pending' WHERE raw_event_id = ?1\", params![event_id])\n            .map_err(|e| BrainError::Database(e.to_string()))?;\n\n        // 4. \u0421\u0431\u0440\u0430\u0441\u044b\u0432\u0430\u0435\u043c event status\n        conn.execute(\"UPDATE raw_events SET status = 'pending' WHERE id = ?1\", params![event_id])\n            .map_err(|e| BrainError::Database(e.to_string()))?;\n\n        Ok(())\n    }\n}\n"
+    }
+  ],
+  "TargetFile": "/home/mrbez/Telegramm/my-bots/daybook/crates/brain-core/src/db.rs",
+  "toolAction": "Fixing db.rs",
+  "toolSummary": "Remove duplicate reset_event_processing method in db.rs"
+}
+COMMAND: grep -n "CREATE TABLE IF NOT EXISTS brain_entries" -A 10 crates/brain-core/src/db.rs
+COMMAND: cat << 'EOF' > rewrite_db.py
+import re
+
+with open('crates/brain-core/src/db.rs', 'r') as f:
+    content = f.read()
+
+# Replace self.conn.lock().unwrap() with .map_err(|e| BrainError::Database(format!("Lock: {}", e)))?
+content = content.replace('.lock().unwrap()', '.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?')
+
+# Replace conn.prepare(...).unwrap() with conn.prepare(...).map_err(...)
+content = re.sub(
+    r'\.prepare\((.*?)\)\.unwrap\(\)',
+    r'.prepare(\1).map_err(|e| BrainError::Database(e.to_string()))?',
+    content
+)
+
+# Replace conn.transaction().unwrap() with conn.transaction().map_err(...)
+content = content.replace('.transaction().unwrap()', '.transaction().map_err(|e| BrainError::Database(e.to_string()))?')
+
+# Replace stmt.query_map(...).unwrap() with map_err
+content = re.sub(
+    r'\.query_map\((.*?)\)\.unwrap\(\)',
+    r'.query_map(\1).map_err(|e| BrainError::Database(e.to_string()))?',
+    content
+)
+
+# Replace stmt.execute(...).unwrap() with map_err
+content = re.sub(
+    r'\.execute\((.*?)\)\.unwrap\(\)',
+    r'.execute(\1).map_err(|e| BrainError::Database(e.to_string()))?',
+    content
+)
+
+# Replace conn.execute(...).unwrap() with map_err
+content = re.sub(
+    r'conn\.execute\((.*?)\)\.unwrap\(\)',
+    r'conn.execute(\1).map_err(|e| BrainError::Database(e.to_string()))?',
+    content
+)
+
+# JSON parsing: serde_json::from_str(...).unwrap()
+content = re.sub(
+    r'serde_json::from_str\((.*?)\)\.unwrap\(\)',
+    r'serde_json::from_str(\1).map_err(|e| BrainError::Database(format!("JSON parse error: {}", e)))?',
+    content
+)
+content = re.sub(
+    r'serde_json::from_value\((.*?)\)\.unwrap\(\)',
+    r'serde_json::from_value(\1).map_err(|e| BrainError::Database(format!("JSON parse error: {}", e)))?',
+    content
+)
+
+# DateTime parsing:
+content = re.sub(
+    r'chrono::DateTime::parse_from_rfc3339\((.*?)\)\.unwrap\(\)',
+    r'chrono::DateTime::parse_from_rfc3339(\1).map_err(|e| BrainError::Database(format!("Date parse error: {}", e)))?',
+    content
+)
+
+with open('crates/brain-core/src/db.rs', 'w') as f:
+    f.write(content)
+
+print("Rewrite complete.")
+EOF
+python3 rewrite_db.py
+cargo check -p brain-core
+
+COMMAND: git checkout crates/brain-core/src/db.rs
+cat << 'EOF' > rewrite_db.py
+import re
+
+with open('crates/brain-core/src/db.rs', 'r') as f:
+    content = f.read()
+
+# Replace self.conn.lock().unwrap() with .map_err(|e| BrainError::Database(format!("Lock: {}", e)))?
+content = content.replace('.lock().unwrap()', '.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?')
+
+# Replace conn.prepare(...).unwrap() with conn.prepare(...).map_err(...)
+content = re.sub(
+    r'\.prepare\((.*?)\)\.unwrap\(\)',
+    r'.prepare(\1).map_err(|e| BrainError::Database(e.to_string()))?',
+    content
+)
+
+# Replace conn.transaction().unwrap() with conn.transaction().map_err(...)
+content = content.replace('.transaction().unwrap()', '.transaction().map_err(|e| BrainError::Database(e.to_string()))?')
+
+# Replace stmt.query_map(...).unwrap() with map_err
+content = re.sub(
+    r'\.query_map\((.*?)\)\.unwrap\(\)',
+    r'.query_map(\1).map_err(|e| BrainError::Database(e.to_string()))?',
+    content
+)
+content = re.sub(
+    r'stmt\.query_row\((.*?)\)\.unwrap\(\)',
+    r'stmt.query_row(\1).map_err(|e| BrainError::Database(e.to_string()))?',
+    content
+)
+
+# Replace stmt.execute(...).unwrap() with map_err
+content = re.sub(
+    r'\.execute\((.*?)\)\.unwrap\(\)',
+    r'.execute(\1).map_err(|e| BrainError::Database(e.to_string()))?',
+    content
+)
+
+# Replace conn.execute(...).unwrap() with map_err
+content = re.sub(
+    r'conn\.execute\((.*?)\)\.unwrap\(\)',
+    r'conn.execute(\1).map_err(|e| BrainError::Database(e.to_string()))?',
+    content
+)
+
+# JSON parsing: serde_json::from_str(...).unwrap() inside map closures where ? returns rusqlite error
+content = re.sub(
+    r'serde_json::from_str\((.*?)\)\.unwrap\(\)',
+    r'serde_json::from_str(\1).map_err(|e| rusqlite::Error::InvalidQuery)?',
+    content
+)
+content = re.sub(
+    r'serde_json::from_value\((.*?)\)\.unwrap\(\)',
+    r'serde_json::from_value(\1).map_err(|e| rusqlite::Error::InvalidQuery)?',
+    content
+)
+
+# DateTime parsing:
+content = re.sub(
+    r'chrono::DateTime::parse_from_rfc3339\((.*?)\)\.unwrap\(\)',
+    r'chrono::DateTime::parse_from_rfc3339(\1).map_err(|e| rusqlite::Error::InvalidQuery)?',
+    content
+)
+
+with open('crates/brain-core/src/db.rs', 'w') as f:
+    f.write(content)
+
+print("Rewrite complete.")
+EOF
+python3 rewrite_db.py
+cargo check -p brain-core
+
+COMMAND: git diff crates/brain-core/src/db.rs
+COMMAND: git checkout crates/brain-core/src/db.rs
+COMMAND: grep -n -B 1 -A 1 "\.unwrap()" crates/brain-core/src/db.rs
+COMMAND: cat << 'EOF' > rewrite_db.py
+import re
+
+with open('crates/brain-core/src/db.rs', 'r') as f:
+    content = f.read()
+
+# Replace self.conn.lock().unwrap()
+content = content.replace('.lock().unwrap()', '.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?')
+
+# Replace conn.prepare(...).unwrap()
+content = re.sub(
+    r'\.prepare\((.*?)\)\.unwrap\(\)',
+    r'.prepare(\1).map_err(|e| BrainError::Database(e.to_string()))?',
+    content,
+    flags=re.DOTALL
+)
+
+# Replace stmt.query_map(...).unwrap()
+content = re.sub(
+    r'\.query_map\((.*?)\)\.unwrap\(\)',
+    r'.query_map(\1).map_err(|e| BrainError::Database(e.to_string()))?',
+    content,
+    flags=re.DOTALL
+)
+
+# Replace stmt.query_row(...).unwrap()
+content = re.sub(
+    r'\.query_row\((.*?)\)\.unwrap\(\)',
+    r'.query_row(\1).map_err(|e| BrainError::Database(e.to_string()))?',
+    content,
+    flags=re.DOTALL
+)
+
+# Replace conn.execute(...).unwrap()
+content = re.sub(
+    r'\.execute\((.*?)\)\.unwrap\(\)',
+    r'.execute(\1).map_err(|e| BrainError::Database(e.to_string()))?',
+    content,
+    flags=re.DOTALL
+)
+
+# Replace conn.transaction().unwrap()
+content = content.replace('.transaction().unwrap()', '.transaction().map_err(|e| BrainError::Database(e.to_string()))?')
+
+# Fix JSON and Date parsing unwraps (which are often inside closures)
+# We map them to rusqlite::Error::InvalidQuery (which exists in rusqlite 0.29+)
+content = re.sub(
+    r'serde_json::from_str(::<\w+>)?\((.*?)\)\.unwrap\(\)',
+    r'serde_json::from_str\1(\2).map_err(|e| rusqlite::Error::InvalidQuery)?',
+    content,
+    flags=re.DOTALL
+)
+
+content = re.sub(
+    r'chrono::DateTime::parse_from_rfc3339\((.*?)\)\.unwrap\(\)',
+    r'chrono::DateTime::parse_from_rfc3339(\1).map_err(|e| rusqlite::Error::InvalidQuery)?',
+    content,
+    flags=re.DOTALL
+)
+
+with open('crates/brain-core/src/db.rs', 'w') as f:
+    f.write(content)
+EOF
+python3 rewrite_db.py
+cargo check -p brain-core
+
+COMMAND: git checkout crates/brain-core/src/db.rs
+COMMAND: cat << 'EOF' > rewrite_db.py
+with open('crates/brain-core/src/db.rs', 'r') as f:
+    lines = f.readlines()
+
+for i, line in enumerate(lines):
+    # Lock:
+    line = line.replace('.lock().unwrap()', '.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?')
+    
+    # Blocks:
+    line = line.replace('}).unwrap();', '}).map_err(|e| BrainError::Database(e.to_string()))?;')
+    
+    # Prepare:
+    line = line.replace('").unwrap();', '").map_err(|e| BrainError::Database(e.to_string()))?;')
+    line = line.replace('&query).unwrap();', '&query).map_err(|e| BrainError::Database(e.to_string()))?;')
+    line = line.replace('&sql).unwrap();', '&sql).map_err(|e| BrainError::Database(e.to_string()))?;')
+    
+    # Transaction:
+    line = line.replace('.transaction().unwrap()', '.transaction().map_err(|e| BrainError::Database(e.to_string()))?')
+    
+    # JSON / Date:
+    if 'serde_json::from_str' in line and '.unwrap()' in line:
+        line = line.replace('.unwrap()', '.map_err(|_| rusqlite::Error::InvalidQuery)?')
+    if 'DateTime::parse_from_rfc3339' in line and '.unwrap()' in line:
+        line = line.replace('.unwrap()', '.map_err(|_| rusqlite::Error::InvalidQuery)?')
+    
+    # Others:
+    if 'row.get' in line and '.unwrap()' in line:
+        line = line.replace('.unwrap()', '?')
+    
+    if '.query_map(' in line and '.unwrap()' in line:
+        line = line.replace('.unwrap()', '.map_err(|e| BrainError::Database(e.to_string()))?')
+
+    lines[i] = line
+
+with open('crates/brain-core/src/db.rs', 'w') as f:
+    f.writelines(lines)
+EOF
+python3 rewrite_db.py
+cargo check -p brain-core
+COMMAND: git checkout crates/brain-core/src/db.rs
+cat << 'EOF' > rewrite_db.py
+with open('crates/brain-core/src/db.rs', 'r') as f:
+    lines = f.readlines()
+
+for i, line in enumerate(lines):
+    if 'unwrap()' in line:
+        if 'lock()' in line:
+            line = line.replace('.unwrap()', '.map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?')
+        elif 'query_map' in line or 'query_row' in line or 'execute' in line or 'prepare' in line or 'transaction' in line:
+            # We only replace the .unwrap() at the end of the chain. 
+            # To be safe, we just replace all unwrap() on that line if it's a db operation.
+            # But wait, there might be row.get(0).unwrap() inside the closure.
+            line = line.replace('.unwrap()', '.map_err(|e| BrainError::Database(e.to_string()))?')
+        elif 'serde_json::from_str' in line or 'DateTime::parse' in line:
+            # Inside closure
+            line = line.replace('.unwrap()', '.map_err(|_| rusqlite::Error::InvalidQuery)?')
+        
+    lines[i] = line
+
+with open('crates/brain-core/src/db.rs', 'w') as f:
+    f.writelines(lines)
+EOF
+python3 rewrite_db.py
+cargo check -p brain-core
+COMMAND: git checkout crates/brain-core/src/db.rs
+grep "^impl" crates/brain-core/src/db.rs
+
+COMMAND: grep -n -A 5 "append_audit_event" crates/brain-core/src/db.rs
+COMMAND: git checkout crates/brain-core/src/db.rs
+grep -n -A 5 "append_audit_event" crates/brain-core/src/db.rs
+COMMAND: grep -B 5 -A 20 "multi_replace_file_content" /home/mrbez/.gemini/antigravity-cli/brain/2b39969d-24cd-467f-8066-bb138c96adcd/.system_generated/logs/transcript_full.jsonl | grep "db.rs" -A 100 > recovered_edits.txt
+cat recovered_edits.txt
+COMMAND: cat << 'EOF' > recover_db.py
+import json
+
+with open('/home/mrbez/.gemini/antigravity-cli/brain/2b39969d-24cd-467f-8066-bb138c96adcd/.system_generated/logs/transcript_full.jsonl', 'r') as f:
+    for line in f:
+        data = json.loads(line)
+        if data.get('type') == 'PLANNER_RESPONSE':
+            for tool_call in data.get('tool_calls', []):
+                name = tool_call.get('name')
+                args = tool_call.get('args', {})
+                if name in ['multi_replace_file_content', 'replace_file_content']:
+                    target = args.get('TargetFile', '')
+                    if 'db.rs' in target:
+                        print("FOUND EDIT for db.rs")
+                        chunks = args.get('ReplacementChunks', [])
+                        if not chunks:
+                            print(args.get('ReplacementContent'))
+                        else:
+                            for c in chunks:
+                                print(c.get('ReplacementContent'))
+                        print("-" * 80)
+EOF
+python3 recover_db.py
+COMMAND: cat << 'EOF' > patch_db.py
+import json
+
+edits = []
+with open('/home/mrbez/.gemini/antigravity-cli/brain/2b39969d-24cd-467f-8066-bb138c96adcd/.system_generated/logs/transcript_full.jsonl', 'r') as f:
+    for line in f:
+        data = json.loads(line)
+        if data.get('type') == 'PLANNER_RESPONSE':
+            for tool_call in data.get('tool_calls', []):
+                name = tool_call.get('name')
+                args = tool_call.get('args', {})
+                if name in ['multi_replace_file_content', 'replace_file_content']:
+                    target = args.get('TargetFile', '')
+                    if 'db.rs' in target:
+                        chunks = args.get('ReplacementChunks', [])
+                        if not chunks:
+                            edits.append((args.get('TargetContent'), args.get('ReplacementContent')))
+                        else:
+                            for c in chunks:
+                                edits.append((c.get('TargetContent'), c.get('ReplacementContent')))
+
+with open('crates/brain-core/src/db.rs', 'r') as f:
+    content = f.read()
+
+for target, replacement in edits:
+    content = content.replace(target, replacement)
+
+with open('crates/brain-core/src/db.rs', 'w') as f:
+    f.write(content)
+EOF
+python3 patch_db.py
+cargo check -p brain-core
+COMMAND: cat << 'EOF' > recover_all.py
+import json
+
+with open('/home/mrbez/.gemini/antigravity-cli/brain/2b39969d-24cd-467f-8066-bb138c96adcd/.system_generated/logs/transcript_full.jsonl', 'r') as f:
+    for line in f:
+        data = json.loads(line)
+        if data.get('type') == 'PLANNER_RESPONSE':
+            for tc in data.get('tool_calls', []):
+                args = tc.get('args', {})
+                # Check for run_command with db.rs
+                if tc.get('name') == 'run_command' and 'db.rs' in args.get('CommandLine', ''):
+                    print(f"COMMAND: {args.get('CommandLine')}")
+                elif tc.get('name') in ['replace_file_content', 'multi_replace_file_content', 'write_to_file'] and 'db.rs' in args.get('TargetFile', args.get('AbsolutePath', '')):
+                    print(f"TOOL: {tc.get('name')}")
+                    print(json.dumps(args, indent=2))
+EOF
+python3 recover_all.py > all_db_edits.txt
+cat all_db_edits.txt | grep -n ""

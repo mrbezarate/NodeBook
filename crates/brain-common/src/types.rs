@@ -212,6 +212,7 @@ pub struct Classification {
     pub suggested_title: String,
     pub suggested_links: Vec<SemanticLink>,
     pub summary: String,
+    pub enriched_text: Option<String>,
 }
 
 // ── Источник записи ─────────────────────────────────────────
@@ -219,7 +220,7 @@ pub struct Classification {
 /// Откуда пришла запись.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EntrySource {
-    Telegram { user_id: u64, message_id: i32 },
+    Telegram { user_id: u64, message_id: i32, processing_msg_id: Option<i32> },
     Cli,
     Web,
     Import,
@@ -248,6 +249,49 @@ pub struct Job {
 
 // ── Запись Brain ────────────────────────────────────────────
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SourcingEvent {
+    MessageIngested { text: String, source: EntrySource },
+    LlmProcessRequested { text: String, source: EntrySource },
+    EmbeddingProcessRequested { text: String },
+    
+    LlmProcessed { summary: String, tags: Vec<String>, enriched_text: Option<String> },
+    EmbeddingGenerated { vector_id: String },
+    EntryStored { path: String },
+    FallbackTriggered { reason: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectionEntry {
+    pub id: String,
+    pub raw: String,
+    pub summary: String,
+    pub tags: Vec<String>,
+    pub is_fallback: bool,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl Default for ProjectionEntry {
+    fn default() -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            raw: "".to_string(),
+            summary: "".to_string(),
+            tags: vec![],
+            is_fallback: false,
+            created_at: chrono::Utc::now(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourcingEventRecord {
+    pub id: String,
+    pub aggregate_id: String,
+    pub event: SourcingEvent,
+    pub created_at: DateTime<Utc>,
+}
+
 /// Обработанная запись, готовая к сохранению.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrainEntry {
@@ -256,6 +300,29 @@ pub struct BrainEntry {
     pub classification: Classification,
     pub created_at: DateTime<Utc>,
     pub source: EntrySource,
+}
+
+impl BrainEntry {
+    pub fn fallback(text: &str, source: EntrySource) -> Self {
+        Self {
+            id: EntryId::new(),
+            raw_text: text.to_string(),
+            classification: Classification {
+                entry_type: EntryType::Idea,
+                area: Area::Custom("Fallback".to_string()),
+                para_category: ParaCategory::Inbox,
+                entities: vec![],
+                tags: vec![],
+                confidence: 0.1,
+                suggested_title: format!("Unprocessed: {}", &text[0..20.min(text.len())]),
+                suggested_links: vec![],
+                summary: "This entry was created as a fallback due to a pipeline failure.".to_string(),
+                enriched_text: None,
+            },
+            created_at: Utc::now(),
+            source,
+        }
+    }
 }
 
 // ── Embedding ───────────────────────────────────────────────

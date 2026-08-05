@@ -26,7 +26,7 @@ pub async fn handle_message(
     let allowed = &engine.config.telegram.allowed_users;
     if allowed.is_empty() || !allowed.contains(&user_id) {
         tracing::warn!("🚫 Попытка несанкционированного доступа от user_id: {}", user_id);
-        bot.send_message(chat_id, "🔒 <b>Доступ запрещён.</b>\nЭто приватная система управления знаниями владельца.")
+        bot.send_message(chat_id, "🔒 <b>Доступ запрещён.</b>\nЭто приватная система управления владельца.")
             .parse_mode(teloxide::types::ParseMode::Html)
             .await?;
         return Ok(());
@@ -38,7 +38,7 @@ pub async fn handle_message(
             crate::handlers::command::handle_command(&bot, &msg, "/diary", &engine, &state_manager).await?;
             return Ok(());
         }
-        "📊 Аналитика и Граф" | "/analytics" => {
+        "📊 Аналитика" | "/analytics" => {
             crate::handlers::analytics::send_analytics_menu(&bot, chat_id).await?;
             return Ok(());
         }
@@ -50,8 +50,8 @@ pub async fn handle_message(
             crate::handlers::command::handle_command(&bot, &msg, "/today", &engine, &state_manager).await?;
             return Ok(());
         }
-        "⌛ Статистика жизни" | "📊 Статистика" => {
-            crate::handlers::command::handle_command(&bot, &msg, "/stats", &engine, &state_manager).await?;
+        "/viz" => {
+            crate::handlers::visual::handle_visual_command(bot.clone(), msg.clone(), engine.clone()).await?;
             return Ok(());
         }
         "ℹ️ Справка" => {
@@ -78,18 +78,58 @@ pub async fn handle_message(
             state_manager.reset(user_id).await;
             crate::handlers::command::execute_search(&bot, chat_id, text, &engine).await?;
         }
+        UserState::Editing { entry_id, field: _ } => {
+            state_manager.reset(user_id).await;
+            match engine.find_path_by_id(&entry_id).await {
+                Ok(path) => {
+                    if let Err(e) = engine.append_to_entry(&path, text).await {
+                        bot.send_message(chat_id, format!("❌ Ошибка при дополнении: {}", e)).await?;
+                    } else {
+                        bot.send_message(chat_id, "✅ Запись успешно дополнена!").await?;
+                    }
+                }
+                Err(_) => {
+                    bot.send_message(chat_id, "❌ Исходная запись не найдена.").await?;
+                }
+            }
+        }
         _ => {
             // Default: ingest as a raw event
-            let source = EntrySource::Telegram { user_id, message_id: msg.id.0 };
-            match engine.ingest_raw_event(text, source).await {
-                Ok(_event_id) => {
-                    bot.send_message(chat_id,
-                        "⏳ <b>Анализирую и классифицирую...</b>\n<i>Мысль сохранена, обрабатываю в фоне →</i> Obsidian"
-                    )
-                    .parse_mode(teloxide::types::ParseMode::Html)
-                    .await?;
+            let processing_msg = bot.send_message(chat_id,
+                "⏳ <b>Анализирую и классифицирую...</b>\n<i>Мысль сохранена, обрабатываю в фоне →</i> Obsidian"
+            )
+            .parse_mode(teloxide::types::ParseMode::Html)
+            .await?;
+
+            let source = EntrySource::Telegram { 
+                user_id, 
+                message_id: msg.id.0,
+                processing_msg_id: Some(processing_msg.id.0)
+            };
+            
+            match engine.ingest(text, source).await {
+                Ok((_, id)) => {
+                    // Fast CQRS poll: try to get projection, or fallback to simple message
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await; // give projection worker a tiny headstart
+                    
+                    let mut reply_text = "✅ Принято в обработку.".to_string();
+                    if let Ok(Some(proj)) = engine.get_entry(&id).await {
+                        let tags = proj.tags.join(", ");
+                        reply_text = format!("✅ Записано.\n{}",
+                            if !proj.summary.is_empty() { proj.summary.clone() } else { "Ожидает анализ...".to_string() }
+                        );
+                        if !tags.is_empty() {
+                            reply_text.push_str(&format!("\n🏷 {}", tags));
+                        }
+                    }
+
+                    let _ = bot.delete_message(chat_id, processing_msg.id).await;
+                    bot.send_message(chat_id, reply_text)
+                        .parse_mode(teloxide::types::ParseMode::Html)
+                        .await?;
                 }
                 Err(e) => {
+                    let _ = bot.delete_message(chat_id, processing_msg.id).await;
                     bot.send_message(chat_id, format!("❌ Ошибка: {}", e)).await?;
                 }
             }

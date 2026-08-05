@@ -33,6 +33,7 @@ impl VaultStorage for ObsidianVault {
             &entry.classification.para_category,
             &entry.classification.area,
             &entry.classification.suggested_title,
+            entry.id.as_str(),
         );
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
@@ -77,5 +78,22 @@ impl VaultStorage for ObsidianVault {
     async fn entry_exists(&self, title: &str) -> Result<bool> {
         let entries = self.list_entries("").await?;
         Ok(entries.iter().any(|p| p.contains(title)))
+    }
+
+    async fn delete_entry(&self, file_path: &str) -> Result<()> {
+        tokio::fs::remove_file(file_path).await.map_err(|e| BrainError::Vault(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn append_to_entry(&self, file_path: &str, text: &str) -> Result<()> {
+        use tokio::io::AsyncWriteExt;
+        let mut file = tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(file_path)
+            .await
+            .map_err(|e| BrainError::Vault(e.to_string()))?;
+        let formatted = format!("\n\n---\n*Дополнение:*\n{}", text);
+        file.write_all(formatted.as_bytes()).await.map_err(|e| BrainError::Vault(e.to_string()))?;
+        Ok(())
     }
 }

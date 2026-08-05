@@ -5,7 +5,9 @@ use crate::traits::AiProvider;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct StructuredObservation {
+    pub title: Option<String>,
     pub summary: String,
+    pub enriched_text: Option<String>,
     pub entities: Vec<String>,
     pub tags: Vec<String>,
     pub confidence: f32,

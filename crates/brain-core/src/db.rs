@@ -4,6 +4,26 @@ use crate::traits::{KnowledgeStore, RawEventStore};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::sync::{Arc, Mutex};
 
+
+fn with_retry<F, T>(mut f: F) -> Result<T>
+where
+    F: FnMut() -> std::result::Result<T, rusqlite::Error>,
+{
+    let mut retries = 3;
+    loop {
+        match f() {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                if retries == 0 {
+                    return Err(BrainError::Database(e.to_string()));
+                }
+                retries -= 1;
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    }
+}
+
 pub struct SqliteKnowledgeStore {
     conn: Arc<Mutex<Connection>>,
 }
@@ -18,6 +38,36 @@ impl SqliteKnowledgeStore {
         // 1. Создаем нормализованную схему
         conn.execute_batch(
             "
+            
+            CREATE TABLE IF NOT EXISTS audit_events (
+                id TEXT PRIMARY KEY,
+                aggregate_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                processed INTEGER DEFAULT 0,
+                projected INTEGER DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_audit_aggregate ON audit_events(aggregate_id);
+
+            CREATE TABLE IF NOT EXISTS brain_entries (
+                id TEXT PRIMARY KEY,
+                raw TEXT,
+                summary TEXT,
+                tags TEXT,
+                is_fallback INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS links (
+                from_id TEXT,
+                to_id TEXT,
+                weight REAL DEFAULT 1.0,
+                PRIMARY KEY (from_id, to_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_links_from ON links(from_id);
+            CREATE INDEX IF NOT EXISTS idx_links_to ON links(to_id);
+
             CREATE TABLE IF NOT EXISTS raw_events (
                 id TEXT PRIMARY KEY,
                 source_type TEXT NOT NULL,
@@ -118,9 +168,9 @@ impl SqliteKnowledgeStore {
 #[async_trait]
 impl KnowledgeStore for SqliteKnowledgeStore {
     async fn get_entity(&self, id: &str) -> Result<Option<Entity>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
         
-        let mut stmt = conn.prepare("SELECT name, entity_type, area, summary FROM entities WHERE id = ?1").unwrap();
+        let mut stmt = conn.prepare("SELECT name, entity_type, area, summary FROM entities WHERE id = ?1").map_err(|e| BrainError::Database(e.to_string()))?;
         let entity_base = stmt.query_row(params![id], |row| {
             let name: String = row.get(0)?;
             let entity_type_str: String = row.get(1)?;
@@ -150,38 +200,38 @@ impl KnowledgeStore for SqliteKnowledgeStore {
         };
 
         // Загружаем теги
-        let mut tags_stmt = conn.prepare("SELECT tag FROM tags WHERE entity_id = ?1").unwrap();
-        let tags_iter = tags_stmt.query_map(params![id], |row| row.get(0)).unwrap();
+        let mut tags_stmt = conn.prepare("SELECT tag FROM tags WHERE entity_id = ?1").map_err(|e| BrainError::Database(e.to_string()))?;
+        let tags_iter = tags_stmt.query_map(params![id], |row| row.get(0)).map_err(|e| BrainError::Database(e.to_string()))?;
         entity.tags = tags_iter.filter_map(std::result::Result::ok).collect();
 
         // Загружаем алиасы
-        let mut aliases_stmt = conn.prepare("SELECT alias FROM aliases WHERE entity_id = ?1").unwrap();
-        let aliases_iter = aliases_stmt.query_map(params![id], |row| row.get(0)).unwrap();
+        let mut aliases_stmt = conn.prepare("SELECT alias FROM aliases WHERE entity_id = ?1").map_err(|e| BrainError::Database(e.to_string()))?;
+        let aliases_iter = aliases_stmt.query_map(params![id], |row| row.get(0)).map_err(|e| BrainError::Database(e.to_string()))?;
         entity.aliases = aliases_iter.filter_map(std::result::Result::ok).collect();
 
         // Загружаем связи (Relations)
-        let mut rels_stmt = conn.prepare("SELECT relation, to_entity FROM relations WHERE from_entity = ?1").unwrap();
+        let mut rels_stmt = conn.prepare("SELECT relation, to_entity FROM relations WHERE from_entity = ?1").map_err(|e| BrainError::Database(e.to_string()))?;
         let rels_iter = rels_stmt.query_map(params![id], |row| {
             std::result::Result::Ok(SemanticLink {
                 relation: row.get(0)?,
                 target: row.get(1)?,
             })
-        }).unwrap();
+        }).map_err(|e| BrainError::Database(e.to_string()))?;
         entity.links = rels_iter.filter_map(std::result::Result::ok).collect();
 
         // Загружаем sources
-        let mut src_stmt = conn.prepare("SELECT source_json FROM sources WHERE entity_id = ?1").unwrap();
+        let mut src_stmt = conn.prepare("SELECT source_json FROM sources WHERE entity_id = ?1").map_err(|e| BrainError::Database(e.to_string()))?;
         let src_iter = src_stmt.query_map(params![id], |row| {
             let json_str: String = row.get(0)?;
             std::result::Result::Ok(serde_json::from_str::<EntrySource>(&json_str).ok())
-        }).unwrap();
+        }).map_err(|e| BrainError::Database(e.to_string()))?;
         entity.sources = src_iter.filter_map(std::result::Result::ok).flatten().collect();
         
         Ok(Some(entity))
     }
 
     async fn save_entity(&self, entity: &Entity) -> Result<()> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
         let tx = conn.transaction().map_err(|e| BrainError::Database(e.to_string()))?;
         
         let area_str = entity.area.as_ref().map(|a| a.to_string());
@@ -240,14 +290,14 @@ impl KnowledgeStore for SqliteKnowledgeStore {
 
     async fn list_entities(&self, filter_type: Option<EntityType>) -> Result<Vec<Entity>> {
         let ids = {
-            let conn = self.conn.lock().unwrap();
+            let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
             let mut result_ids = Vec::new();
             
             let mut query = "SELECT id FROM entities".to_string();
             if let Some(t) = &filter_type {
                 let t_str = format!("{:?}", t);
                 query.push_str(" WHERE entity_type = ?1");
-                let mut stmt = conn.prepare(&query).unwrap();
+                let mut stmt = conn.prepare(&query).map_err(|e| BrainError::Database(e.to_string()))?;
                 let rows = stmt.query_map(params![t_str], |r| r.get::<_, String>(0)).map_err(|e| BrainError::Database(e.to_string()))?;
                 for row in rows {
                     if let Ok(id) = row {
@@ -255,7 +305,7 @@ impl KnowledgeStore for SqliteKnowledgeStore {
                     }
                 }
             } else {
-                let mut stmt = conn.prepare(&query).unwrap();
+                let mut stmt = conn.prepare(&query).map_err(|e| BrainError::Database(e.to_string()))?;
                 let rows = stmt.query_map([], |r| r.get::<_, String>(0)).map_err(|e| BrainError::Database(e.to_string()))?;
                 for row in rows {
                     if let Ok(id) = row {
@@ -280,7 +330,7 @@ impl KnowledgeStore for SqliteKnowledgeStore {
 #[async_trait]
 impl RawEventStore for SqliteKnowledgeStore {
     async fn save_raw_event(&self, event: &RawEvent) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
         conn.execute(
             "INSERT INTO raw_events (id, source_type, source_id, external_id, payload, text, status) 
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -298,7 +348,7 @@ impl RawEventStore for SqliteKnowledgeStore {
     }
 
     async fn create_job(&self, job: &Job) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
         conn.execute(
             "INSERT INTO jobs (id, raw_event_id, job_type, status) VALUES (?1, ?2, ?3, ?4)",
             params![job.id, job.raw_event_id, job.job_type, job.status],
@@ -307,7 +357,7 @@ impl RawEventStore for SqliteKnowledgeStore {
     }
 
     async fn get_next_pending_job(&self, job_type: &str) -> Result<Option<Job>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
         // Атомарный захват Job с использованием UPDATE ... RETURNING
         // SQLite 3.35+ поддерживает RETURNING. Это полностью устраняет гонку воркеров.
         let mut stmt = conn.prepare(
@@ -319,7 +369,7 @@ impl RawEventStore for SqliteKnowledgeStore {
                 LIMIT 1
              )
              RETURNING id, raw_event_id, job_type, status"
-        ).unwrap();
+        ).map_err(|e| BrainError::Database(e.to_string()))?;
 
         let job = stmt.query_row(params![job_type], |row| {
             Ok(Job {
@@ -333,8 +383,30 @@ impl RawEventStore for SqliteKnowledgeStore {
         Ok(job)
     }
 
+    async fn get_links_with_weights(&self, id: &str) -> Result<Vec<(String, f32)>> {
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
+        let mut stmt = conn.prepare("SELECT to_id, weight FROM links WHERE from_id = ?1 AND weight > 1.0 ORDER BY weight DESC LIMIT 20").map_err(|e| BrainError::Database(e.to_string()))?;
+        let iter = stmt.query_map(params![id], |row| Ok((row.get(0)?, row.get(1)?))).map_err(|e| BrainError::Database(e.to_string()))?;
+        Ok(iter.filter_map(std::result::Result::ok).collect())
+    }
+
+    async fn get_links_with_weights_batch(&self, ids: &[String]) -> Result<Vec<(String, String, f32)>> {
+        if ids.is_empty() { return Ok(vec![]); }
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
+        
+        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!("SELECT from_id, to_id, weight FROM links WHERE from_id IN ({}) AND weight > 1.0 ORDER BY weight DESC", placeholders);
+        
+        let mut stmt = conn.prepare(&sql).map_err(|e| BrainError::Database(e.to_string()))?;
+        let params_vec = ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect::<Vec<_>>();
+        let iter = stmt.query_map(rusqlite::params_from_iter(params_vec), |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        }).map_err(|e| BrainError::Database(e.to_string()))?;
+        Ok(iter.filter_map(std::result::Result::ok).collect())
+    }
+
     async fn update_job_status(&self, job_id: &str, status: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
         conn.execute(
             "UPDATE jobs SET status = ?1 WHERE id = ?2",
             params![status, job_id],
@@ -343,8 +415,8 @@ impl RawEventStore for SqliteKnowledgeStore {
     }
 
     async fn get_raw_event(&self, event_id: &str) -> Result<Option<RawEvent>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT id, source_type, source_id, external_id, payload, text, status FROM raw_events WHERE id = ?1").unwrap();
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
+        let mut stmt = conn.prepare("SELECT id, source_type, source_id, external_id, payload, text, status FROM raw_events WHERE id = ?1").map_err(|e| BrainError::Database(e.to_string()))?;
         let event = stmt.query_row(params![event_id], |row| {
             Ok(RawEvent {
                 id: row.get(0)?,
@@ -360,7 +432,7 @@ impl RawEventStore for SqliteKnowledgeStore {
     }
 
     async fn save_observation(&self, observation: &Observation) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
         conn.execute(
             "INSERT OR REPLACE INTO observations (id, raw_event_id, entity_id, fact, confidence, schema_version, extractor_version) 
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -378,8 +450,8 @@ impl RawEventStore for SqliteKnowledgeStore {
     }
 
     async fn get_observations(&self, entity_id: &str) -> Result<Vec<Observation>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT id, raw_event_id, entity_id, fact, confidence, schema_version, extractor_version FROM observations WHERE entity_id = ?1").unwrap();
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
+        let mut stmt = conn.prepare("SELECT id, raw_event_id, entity_id, fact, confidence, schema_version, extractor_version FROM observations WHERE entity_id = ?1").map_err(|e| BrainError::Database(e.to_string()))?;
         let obs_iter = stmt.query_map(params![entity_id], |row| {
             Ok(Observation {
                 id: row.get(0)?,
@@ -402,7 +474,7 @@ impl RawEventStore for SqliteKnowledgeStore {
     }
 
     async fn get_debug_trace(&self, event_id: &str) -> Result<String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
         let mut trace = String::new();
 
         // 1. Raw Event
@@ -444,7 +516,7 @@ impl RawEventStore for SqliteKnowledgeStore {
         }
 
         // 3. Extractor / Observations
-        let mut obs_stmt = conn.prepare("SELECT entity_id, fact, confidence, extractor_version, schema_version FROM observations WHERE raw_event_id = ?1").unwrap();
+        let mut obs_stmt = conn.prepare("SELECT entity_id, fact, confidence, extractor_version, schema_version FROM observations WHERE raw_event_id = ?1").map_err(|e| BrainError::Database(e.to_string()))?;
         let obs_iter = obs_stmt.query_map(params![event_id], |row| {
             Ok((
                 row.get::<_, String>(0)?, 
@@ -453,7 +525,7 @@ impl RawEventStore for SqliteKnowledgeStore {
                 row.get::<_, String>(3)?,
                 row.get::<_, i64>(4)?,
             ))
-        }).unwrap();
+        }).map_err(|e| BrainError::Database(e.to_string()))?;
 
         let mut has_obs = false;
         for obs in obs_iter {
@@ -503,7 +575,7 @@ impl RawEventStore for SqliteKnowledgeStore {
     }
 
     async fn record_metric(&self, name: &str, value: f64, event_id: Option<&str>) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
         conn.execute(
             "INSERT INTO system_metrics (metric_name, metric_value, event_id) VALUES (?1, ?2, ?3)",
             params![name, value, event_id],
@@ -512,7 +584,7 @@ impl RawEventStore for SqliteKnowledgeStore {
     }
 
     async fn get_metrics_report(&self) -> Result<brain_common::SystemMetricsReport> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
         
         let processed: i64 = conn.query_row(
             "SELECT COUNT(*) FROM raw_events WHERE status = 'completed'",
@@ -619,23 +691,196 @@ impl RawEventStore for SqliteKnowledgeStore {
     }
 
     async fn reset_event_processing(&self, event_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        // 1. Убираем observations (cascade)
-        conn.execute("DELETE FROM observations WHERE raw_event_id = ?1", params![event_id])
-            .map_err(|e| BrainError::Database(e.to_string()))?;
-        
-        // 2. Сбрасываем метрики
-        conn.execute("DELETE FROM system_metrics WHERE event_id = ?1", params![event_id])
-            .map_err(|e| BrainError::Database(e.to_string()))?;
-
-        // 3. Сбрасываем job status
-        conn.execute("UPDATE jobs SET status = 'pending' WHERE raw_event_id = ?1", params![event_id])
-            .map_err(|e| BrainError::Database(e.to_string()))?;
-
-        // 4. Сбрасываем event status
-        conn.execute("UPDATE raw_events SET status = 'pending' WHERE id = ?1", params![event_id])
-            .map_err(|e| BrainError::Database(e.to_string()))?;
-
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
+        conn.execute("DELETE FROM observations WHERE raw_event_id = ?1", rusqlite::params![event_id]).map_err(|e| BrainError::Database(e.to_string()))?;
         Ok(())
     }
+
+    async fn append_audit_event(&self, record: &brain_common::SourcingEventRecord) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
+        let payload = serde_json::to_string(&record.event).map_err(|e| BrainError::Database(e.to_string()))?;
+        let ev_type = match &record.event {
+            brain_common::SourcingEvent::MessageIngested { .. } => "MessageIngested",
+            brain_common::SourcingEvent::LlmProcessRequested { .. } => "LlmProcessRequested",
+            brain_common::SourcingEvent::LlmProcessed { .. } => "LlmProcessed",
+            brain_common::SourcingEvent::FallbackTriggered { .. } => "FallbackTriggered",
+            brain_common::SourcingEvent::EmbeddingProcessRequested { .. } => "EmbeddingProcessRequested",
+            brain_common::SourcingEvent::EmbeddingGenerated { .. } => "EmbeddingGenerated",
+            brain_common::SourcingEvent::EntryStored { .. } => "EntryStored",
+            _ => "Other",
+        };
+        
+        with_retry(|| {
+            conn.execute(
+                "INSERT INTO audit_events (id, aggregate_id, event_type, payload, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![record.id, record.aggregate_id, ev_type, payload, record.created_at.to_rfc3339()],
+            )
+        })?;
+        Ok(())
+    }
+
+    async fn load_audit_events(&self, aggregate_id: &str) -> Result<Vec<brain_common::SourcingEventRecord>> {
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
+        let mut stmt = conn.prepare("SELECT id, aggregate_id, payload, created_at FROM audit_events WHERE aggregate_id = ?1 ORDER BY created_at ASC").map_err(|e| BrainError::Database(e.to_string()))?;
+        
+        let iter = stmt.query_map(rusqlite::params![aggregate_id], |row| {
+            let id: String = row.get(0)?;
+            let agg_id: String = row.get(1)?;
+            let payload: String = row.get(2)?;
+            let created_at: String = row.get(3)?;
+            
+            let event: brain_common::SourcingEvent = serde_json::from_str(&payload).map_err(|_| rusqlite::Error::InvalidQuery)?;
+            let date_time = chrono::DateTime::parse_from_rfc3339(&created_at).map_err(|_| rusqlite::Error::InvalidQuery)?.with_timezone(&chrono::Utc);
+            
+            Ok(brain_common::SourcingEventRecord { id, aggregate_id: agg_id, event, created_at: date_time })
+        }).map_err(|e| BrainError::Database(e.to_string()))?;
+        
+        Ok(iter.filter_map(std::result::Result::ok).collect())
+    }
+
+    async fn next_unprocessed_event(&self, event_type: &str) -> Result<Option<brain_common::SourcingEventRecord>> {
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
+        let mut stmt = conn.prepare(
+            "UPDATE audit_events SET processed = 1 
+             WHERE id = (
+                SELECT id FROM audit_events 
+                WHERE processed = 0 AND event_type = ?1
+                ORDER BY created_at ASC 
+                LIMIT 1
+             )
+             RETURNING id, aggregate_id, payload, created_at"
+        ).map_err(|e| BrainError::Database(e.to_string()))?;
+
+        let res = stmt.query_row(rusqlite::params![event_type], |row| {
+            let id: String = row.get(0)?;
+            let agg_id: String = row.get(1)?;
+            let payload: String = row.get(2)?;
+            let created_at: String = row.get(3)?;
+            
+            let event: brain_common::SourcingEvent = serde_json::from_str(&payload).map_err(|_| rusqlite::Error::InvalidQuery)?;
+            let date_time = chrono::DateTime::parse_from_rfc3339(&created_at).map_err(|_| rusqlite::Error::InvalidQuery)?.with_timezone(&chrono::Utc);
+            
+            Ok(brain_common::SourcingEventRecord { id, aggregate_id: agg_id, event, created_at: date_time })
+        }).optional().map_err(|e| BrainError::Database(e.to_string()))?;
+        
+        Ok(res)
+    }
+
+    async fn mark_event_processed(&self, event_id: &str) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
+        with_retry(|| {
+            conn.execute(
+                "UPDATE audit_events SET processed = 1 WHERE id = ?1",
+                rusqlite::params![event_id],
+            )
+        })?;
+        Ok(())
+    }
+
+    async fn next_unprojected_event_any(&self) -> Result<Option<brain_common::SourcingEventRecord>> {
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
+        let mut stmt = conn.prepare(
+            "UPDATE audit_events SET projected = 1 
+             WHERE id = (
+                SELECT id FROM audit_events 
+                WHERE projected = 0 
+                ORDER BY created_at ASC 
+                LIMIT 1
+             )
+             RETURNING id, aggregate_id, payload, created_at"
+        ).map_err(|e| BrainError::Database(e.to_string()))?;
+
+        let record = stmt.query_row([], |row| {
+            let id: String = row.get(0)?;
+            let agg_id: String = row.get(1)?;
+            let payload: String = row.get(2)?;
+            let created_at: String = row.get(3)?;
+            let event: brain_common::SourcingEvent = serde_json::from_str(&payload).map_err(|_| rusqlite::Error::InvalidQuery)?;
+            let date_time = chrono::DateTime::parse_from_rfc3339(&created_at).map_err(|_| rusqlite::Error::InvalidQuery)?.with_timezone(&chrono::Utc);
+            Ok(brain_common::SourcingEventRecord { id, aggregate_id: agg_id, event, created_at: date_time })
+        }).optional().map_err(|e| BrainError::Database(e.to_string()))?;
+        
+        Ok(record)
+    }
+
+    async fn mark_event_projected(&self, event_id: &str) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
+        with_retry(|| {
+            conn.execute(
+                "UPDATE audit_events SET projected = 1 WHERE id = ?1",
+                rusqlite::params![event_id],
+            )
+        })?;
+        Ok(())
+    }
+
+    async fn load_projection(&self, id: &str) -> Result<Option<brain_common::ProjectionEntry>> {
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
+        let mut stmt = conn.prepare("SELECT id, raw, summary, tags, is_fallback, created_at FROM brain_entries WHERE id = ?1").map_err(|e| BrainError::Database(e.to_string()))?;
+        let res = stmt.query_row(rusqlite::params![id], |row| {
+            let id: String = row.get(0)?;
+            let raw: String = row.get(1)?;
+            let summary: String = row.get(2)?;
+            let tags_str: String = row.get(3)?;
+            let is_fallback_int: i32 = row.get(4)?;
+            let created_at: String = row.get(5)?;
+            
+            let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
+            let date_time = chrono::DateTime::parse_from_rfc3339(&created_at).map_err(|_| rusqlite::Error::InvalidQuery)?.with_timezone(&chrono::Utc);
+            
+            Ok(brain_common::ProjectionEntry {
+                id,
+                raw,
+                summary,
+                tags,
+                is_fallback: is_fallback_int > 0,
+                created_at: date_time,
+            })
+        }).optional().map_err(|e| BrainError::Database(e.to_string()))?;
+        
+        Ok(res)
+    }
+
+    async fn save_projection(&self, entry: &brain_common::ProjectionEntry) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
+        let tags_str = serde_json::to_string(&entry.tags).unwrap_or_default();
+        let is_fallback_int = if entry.is_fallback { 1 } else { 0 };
+        
+        with_retry(|| {
+            conn.execute(
+                "INSERT OR REPLACE INTO brain_entries (id, raw, summary, tags, is_fallback) 
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![entry.id, entry.raw, entry.summary, tags_str, is_fallback_int],
+            )
+        })?;
+        Ok(())
+    }
+
+    async fn find_by_tag(&self, tag: &str) -> Result<Vec<String>> {
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
+        let pattern = format!("%\"{}\"%", tag);
+        let mut stmt = conn.prepare("SELECT id FROM brain_entries WHERE tags LIKE ?1 LIMIT 20").map_err(|e| BrainError::Database(e.to_string()))?;
+        let iter = stmt.query_map(rusqlite::params![pattern], |row| row.get(0)).map_err(|e| BrainError::Database(e.to_string()))?;
+        Ok(iter.filter_map(std::result::Result::ok).collect())
+    }
+
+    async fn create_link(&self, from_id: &str, to_id: &str) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
+        with_retry(|| {
+            conn.execute(
+                "INSERT INTO links (from_id, to_id, weight) VALUES (?1, ?2, 1.0) 
+                 ON CONFLICT(from_id, to_id) DO UPDATE SET weight = weight + 1",
+                rusqlite::params![from_id, to_id],
+            )
+        })?;
+        Ok(())
+    }
+
+    async fn get_links(&self, id: &str) -> Result<Vec<String>> {
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
+        let mut stmt = conn.prepare("SELECT to_id FROM links WHERE from_id = ?1 AND weight > 1.0 ORDER BY weight DESC LIMIT 10").map_err(|e| BrainError::Database(e.to_string()))?;
+        let iter = stmt.query_map(rusqlite::params![id], |row| row.get(0)).map_err(|e| BrainError::Database(e.to_string()))?;
+        Ok(iter.filter_map(std::result::Result::ok).collect())
+    }
+
 }

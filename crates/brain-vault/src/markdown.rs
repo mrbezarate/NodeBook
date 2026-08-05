@@ -24,26 +24,9 @@ impl MarkdownBuilder {
         
         md.push_str(&format!("# {}\n\n", fm.title));
 
-        if !entry.classification.summary.is_empty() {
-            md.push_str(&entry.classification.summary);
-            md.push_str("\n\n");
-        }
-
-        md.push_str("## Оригинальная запись\n\n");
-        md.push_str(&entry.raw_text);
+        let body = entry.classification.enriched_text.clone().unwrap_or_else(|| entry.raw_text.clone());
+        md.push_str(&body);
         md.push_str("\n\n");
-
-        if !entry.classification.suggested_links.is_empty() || !entry.classification.entities.is_empty() {
-            md.push_str("## Граф Знаний\n\n");
-            
-            for link in &entry.classification.suggested_links {
-                md.push_str(&format!("- **{}**: [[{}]]\n", link.relation, link.target));
-            }
-            for e in &entry.classification.entities {
-                md.push_str(&format!("- Упоминается: [[{}]] ({:?})\n", e.name, e.entity_type));
-            }
-            md.push('\n');
-        }
 
         if !entry.classification.tags.is_empty() {
             let tags_str = entry.classification.tags.iter().map(|t| format!("#{}", t)).collect::<Vec<_>>().join(" ");

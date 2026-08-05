@@ -94,53 +94,58 @@ impl Consolidator {
         
         let fact_text = serde_json::to_string(&structured_obs).unwrap_or_else(|_| event.text.clone()); 
 
-        // 2. Identity Resolver
-        // Передаём каноническое имя первой извлечённой сущности, а не длинное summary
-        let query_text = structured_obs.entities.first().unwrap_or(&structured_obs.summary);
-        let resolution = self.identity_resolver.resolve(query_text).await?;
-        
-        let mut match_type = "identity_nomatch";
-        let entity_id = match &resolution {
-            Some(res) if res.confidence >= 0.85 => {
-                match_type = match res.matched_by {
-                    MatchMethod::Exact => "identity_exact",
-                    MatchMethod::Alias => "identity_alias",
-                    MatchMethod::Fuzzy => "identity_fuzzy",
-                    MatchMethod::Semantic => "identity_semantic",
-                };
-                res.entity.id.clone()
-            },
-            _ => format!("entity_for_{}", event.id),
-        };
-        let _ = self.raw_event_store.record_metric(match_type, 1.0, Some(&event_id)).await;
+        // 2. Identity Resolver & Processing for ALL entities
+        let mut queries = structured_obs.entities.clone();
+        if queries.is_empty() {
+            queries.push(structured_obs.summary.clone());
+        }
 
-        // 3. Сохраняем Observation в БД 
-        let observation = Observation {
-            id: format!("obs_{}", event.id),
-            raw_event_id: event.id.clone(),
-            entity_id: entity_id.clone(),
-            fact: fact_text,
-            confidence: structured_obs.confidence,
-            schema_version: 1,
-            extractor_version: "v1".to_string(),
-        };
-        self.raw_event_store.save_observation(&observation).await?;
+        for query_text in queries {
+            let resolution = self.identity_resolver.resolve(&query_text).await?;
+            
+            let mut match_type = "identity_nomatch";
+            let entity_id = match &resolution {
+                Some(res) if res.confidence >= 0.85 => {
+                    match_type = match res.matched_by {
+                        MatchMethod::Exact => "identity_exact",
+                        MatchMethod::Alias => "identity_alias",
+                        MatchMethod::Fuzzy => "identity_fuzzy",
+                        MatchMethod::Semantic => "identity_semantic",
+                    };
+                    res.entity.id.clone()
+                },
+                _ => format!("entity_for_{}_{}", event.id, uuid::Uuid::new_v4().to_string().replace("-", "")[..8].to_string()), // Unique id for each entity in same event
+            };
+            let _ = self.raw_event_store.record_metric(match_type, 1.0, Some(&event_id)).await;
 
-        // 4. Projection Engine: пересчитываем Entity
-        let entity = self.projection_engine.project(&entity_id).await?;
+            // 3. Сохраняем Observation в БД
+            let observation = Observation {
+                id: format!("obs_{}_{}", event.id, entity_id),
+                raw_event_id: event.id.clone(),
+                entity_id: entity_id.clone(),
+                fact: fact_text.clone(),
+                confidence: structured_obs.confidence,
+                schema_version: 1,
+                extractor_version: "v1".to_string(),
+            };
+            self.raw_event_store.save_observation(&observation).await?;
 
-        // 5. Сохраняем Entity (опционально, так как это кэш/snapshot)
-        self.knowledge_store.save_entity(&entity).await?;
+            // 4. Projection Engine: пересчитываем Entity
+            let entity = self.projection_engine.project(&entity_id).await?;
 
-        // 6. Renderer: обновляем Markdown
-        self.renderer.render(&entity).await?;
+            // 5. Сохраняем Entity (опционально, так как это кэш/snapshot)
+            self.knowledge_store.save_entity(&entity).await?;
 
-        // 7. Output Delivery — одно финальное сообщение
-        if let Some(sink) = &self.output_sink {
-            let output = brain_common::output::Output::persistent_resource(
-                format!("{}.md", entity.name)
-            );
-            let _ = sink.send(output).await;
+            // 6. Renderer: обновляем Markdown
+            self.renderer.render(&entity).await?;
+
+            // 7. Output Delivery — отправляем сообщение для каждой обновленной сущности
+            if let Some(sink) = &self.output_sink {
+                let output = brain_common::output::Output::persistent_resource(
+                    format!("{}.md", entity.name)
+                );
+                let _ = sink.send(output).await;
+            }
         }
 
         Ok(())

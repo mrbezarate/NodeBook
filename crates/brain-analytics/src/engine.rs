@@ -17,20 +17,22 @@ impl LifeAnalyticsEngine {
         }
     }
 
-    /// Анализ событий и метрик для генерации инсайтов (Event-Sourced Analytics)
-    pub async fn generate_life_insights(&self, metrics: &[DiaryMetrics]) -> Result<String> {
-        // 1. Прочитать последние события из лога
+    pub async fn generate_life_insights(&self, metrics: &[DiaryMetrics], period_days: usize) -> Result<String> {
         let all_events = self.event_reader.read_all_events().await.unwrap_or_default();
-        // Берем, например, последние 100 событий
-        let recent_events: Vec<&Event> = all_events.iter().rev().take(100).collect();
         
-        // 2. Собрать метрики за последнюю неделю
-        let recent_metrics: Vec<&DiaryMetrics> = metrics.iter().rev().take(7).collect();
+        let events_limit = match period_days {
+            7 => 30,
+            30 => 100,
+            365 => 200,
+            _ => 300,
+        };
+
+        let recent_events: Vec<&Event> = all_events.iter().rev().take(events_limit).collect();
+        let recent_metrics: Vec<&DiaryMetrics> = metrics.iter().rev().take(period_days).collect();
         
-        // 3. Форматировать данные для ИИ
         let mut prompt_data = String::new();
-        prompt_data.push_str("--- DIARY METRICS (LAST 7 DAYS) ---\n");
-        for m in recent_metrics {
+        prompt_data.push_str(&format!("--- DIARY METRICS (LAST {} DAYS) ---\n", period_days));
+        for m in &recent_metrics {
             prompt_data.push_str(&format!(
                 "Date: {}, Mood: {:?}, Stress: {:?}, Sleep: {:?}h, Productivity: {:?}\n",
                 m.date, m.mood, m.stress, m.sleep_hours, m.productivity
@@ -38,17 +40,23 @@ impl LifeAnalyticsEngine {
         }
         
         prompt_data.push_str("\n--- RECENT KNOWLEDGE EVENTS ---\n");
-        for e in recent_events.iter().take(20) {
+        for e in recent_events.iter() {
             prompt_data.push_str(&format!("Time: {}, Event: {:?}\n", e.timestamp.format("%Y-%m-%d"), e.event_type));
         }
         
-        // 4. Попросить ИИ найти корреляции (Life Insights)
+        let period_str = match period_days {
+            7 => "week",
+            30 => "month",
+            365 => "year",
+            _ => "entire history",
+        };
+
         let prompt = format!(
-            "You are a Life Analytics AI. Analyze the user's recent Diary Metrics (mood, stress, sleep, etc.) \
-            and their Knowledge Events (what they learned, searched, or wrote about recently).\n\
+            "You are a Life Analytics AI. Analyze the user's Diary Metrics (mood, stress, sleep, etc.) \
+            and their Knowledge Events (what they learned, searched, or wrote about) for the last {}.\n\
             Find 2-3 deep, meaningful correlations between their knowledge work and their mood/sleep/stress. \
             Format the response as a short, inspiring message with bullet points. Speak in Russian directly to the user.\n\n{}",
-            prompt_data
+            period_str, prompt_data
         );
         
         let insight = self.ai_provider.complete(&prompt).await?;

@@ -42,6 +42,7 @@ impl AiProvider for MockFixtureAiProvider {
             return Ok("{ bad json".into());
         }
         let obs = brain_core::extractor::StructuredObservation {
+            title: None,
             summary: self.summary.clone(),
             entities: self.entities.clone(),
             tags: vec![],

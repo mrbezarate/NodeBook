@@ -16,9 +16,14 @@ pub fn yes_no_keyboard(prefix: &str) -> InlineKeyboardMarkup {
     ]])
 }
 
-/// Действия с сохранённой записью.
-pub fn entry_actions_keyboard(file_path: &str) -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![vec![
-        InlineKeyboardButton::callback("📁 Путь к файлу", format!("path:{file_path}")),
-    ]])
+pub fn entry_actions_keyboard(entry_id: &str) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![
+            InlineKeyboardButton::callback("🔍 Детали", format!("details:{entry_id}")),
+            InlineKeyboardButton::callback("📝 Дополнить", format!("edit:{entry_id}")),
+        ],
+        vec![
+            InlineKeyboardButton::callback("🗑 Удалить", format!("delete:{entry_id}")),
+        ]
+    ])
 }

@@ -14,7 +14,6 @@ members = [
     "crates/brain-parser",
     "crates/brain-classifier",
     "crates/brain-ai",
-    "crates/brain-embeddings",
 
     # ── Storage & Knowledge ───────────────────────────────
     "crates/brain-vault",
@@ -23,7 +22,7 @@ members = [
     # ── Features ──────────────────────────────────────────
     "crates/brain-diary",
     "crates/brain-scheduler",
-    "crates/brain-analytics", "crates/brain-indexer", "crates/brain-retrieval", "crates/brain-events", "crates/brain-memory", "crates/brain-reasoner",
+    "crates/brain-analytics", "crates/brain-indexer", "crates/brain-retrieval", "crates/brain-events", "crates/brain-memory", "crates/brain-reasoner", "crates/brain-charts",
 ]
 
 [workspace.package]

@@ -40,6 +40,12 @@ pub enum BrainError {
 
     #[error("Telegram error: {0}")]
     Telegram(String),
+
+    #[error("Validation error: {0}")]
+    Validation(String),
+
+    #[error("System error: {0}")]
+    System(String),
 }
 
 /// Удобный алиас для Result с BrainError.

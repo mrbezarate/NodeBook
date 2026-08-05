@@ -21,6 +21,7 @@ impl AiProvider for MockAiProvider {
     
     async fn complete_json(&self, _prompt: &str) -> Result<String> {
         Ok(r#"{
+            "title": "Multiplayer Feature",
             "summary": "Project supports multiplayer",
             "entities": ["Space Cowboy", "Multiplayer"],
             "tags": ["idea", "feature"],

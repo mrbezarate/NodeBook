@@ -3,6 +3,19 @@ use brain_common::{BrainEntry, BrainError, Classification, EntryId, EntrySource,
 use std::sync::Arc;
 use chrono::Utc;
 
+#[derive(serde::Deserialize)]
+struct AgenticOutput {
+    title: String,
+    #[serde(rename = "type")]
+    entry_type: String,
+    area: String,
+    para: String,
+    summary: String,
+    tags: Vec<String>,
+    semantic_edges: Vec<SemanticLink>,
+    enriched_text: Option<String>,
+}
+
 pub struct AgenticPipeline {
     ai_provider: Arc<dyn AiProvider>,
     entity_extractor: Arc<dyn EntityExtractor>,
@@ -56,12 +69,13 @@ Extracted Entities:
 {:?}
 
 Instructions:
-1. Title: Create a concise, meaningful title (2-5 words). Do not just repeat the first words. If it belongs to an existing project, use that project's working title (e.g. "Space Cowboy RPG").
+1. Title: Create a highly specific noun or proper noun for the title (e.g. "Екдрасиль" instead of "Idea for a game"). If none exists, synthesize a 1-3 word noun phrase.
 2. Type & Area: Choose appropriate type (Project, Idea, Knowledge, Task, etc.) and Area (GameDev, Career, etc.).
 3. PARA: Is it a Project (active), Area (ongoing responsibility), Resource (reference material), or Archive?
 4. Summary: Generate a concise summary of the knowledge (2-3 sentences max).
 5. Tags: Extract a comprehensive list of tags (lowercase, no spaces, e.g., "gamedev", "rpg", "procedural_generation").
 6. Semantic Edges: Describe the relations this note has with other concepts. (target, relation type like "InspiredBy", "SimilarTo", "HasFeature").
+7. Enriched Text: Take the exact original user message, but replace any mentioned entities, concepts, or project names with Obsidian wikilinks (e.g. wrap them in [[...]] like `проект [[Екдрасиль]]`). Do not change the tone, grammar, or words otherwise.
 
 Output strictly in JSON format matching this schema:
 {{
@@ -73,28 +87,41 @@ Output strictly in JSON format matching this schema:
   "tags": ["..."],
   "semantic_edges": [
     {{"target": "...", "relation": "..."}}
-  ]
+  ],
+  "enriched_text": "..."
 }}
 "#,
             context_str, clean_text, entities
         );
 
-        let json_str = self.ai_provider.complete(&prompt).await?;
-        
-        #[derive(serde::Deserialize)]
-        struct AgenticOutput {
-            title: String,
-            #[serde(rename = "type")]
-            entry_type: String,
-            area: String,
-            para: String,
-            summary: String,
-            tags: Vec<String>,
-            semantic_edges: Vec<SemanticLink>,
+        let mut retries = 3;
+        let mut parsed: Option<AgenticOutput> = None;
+        let mut last_err = String::new();
+
+        while retries > 0 {
+            match self.ai_provider.complete(&prompt).await {
+                Ok(json_str) => {
+                    match serde_json::from_str::<AgenticOutput>(&json_str) {
+                        Ok(result) => {
+                            parsed = Some(result);
+                            break;
+                        }
+                        Err(e) => {
+                            last_err = format!("JSON parse error: {}", e);
+                            tracing::warn!("LLM output parsing failed, retrying. Error: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    last_err = format!("LLM completion error: {:?}", e);
+                    tracing::warn!("LLM completion failed, retrying. Error: {:?}", e);
+                }
+            }
+            retries -= 1;
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
 
-        let parsed: AgenticOutput = serde_json::from_str(&json_str)
-            .map_err(|e| BrainError::Parser(format!("Failed to parse LLM JSON: {}", e)))?;
+        let parsed = parsed.ok_or_else(|| BrainError::Parser(format!("Failed after 3 retries. Last error: {}", last_err)))?;
 
         // Convert parsed strings to enums safely
         let entry_type = match parsed.entry_type.as_str() {
@@ -132,6 +159,7 @@ Output strictly in JSON format matching this schema:
             suggested_title: parsed.title,
             suggested_links: parsed.semantic_edges,
             summary: parsed.summary,
+            enriched_text: parsed.enriched_text,
         };
 
         Ok(BrainEntry {

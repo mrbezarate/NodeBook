@@ -38,8 +38,12 @@ impl ContextManager for BrainMemory {
 
         // 2. Keyword Search (Extract a naive keyword from the text for searching)
         // Just search the raw text directly. If it's too long, truncate it.
-        let query = if text.len() > 100 { &text[..100] } else { text };
-        if let Ok(results) = self.vault.search_by_text(query).await {
+        let query_str = if text.len() > 100 {
+            text.chars().take(100).collect::<String>()
+        } else {
+            text.to_string()
+        };
+        if let Ok(results) = self.vault.search_by_text(&query_str).await {
             context.keyword_results = results.into_iter().take(3).collect();
         }
 

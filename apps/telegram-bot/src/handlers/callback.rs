@@ -53,14 +53,48 @@ pub async fn handle_callback(
                 ).await?;
             }
         }
-        "path" => {
+        "visual" => {
+            if let (Some(chat_id), Some(message_id)) = (chat_id, message_id) {
+                crate::handlers::visual::handle_visual_callback(
+                    bot.clone(), chat_id, message_id, &value, &engine
+                ).await?;
+            }
+        }
+        "details" => {
             if let Some(chat_id) = chat_id {
-                bot.send_message(
-                    chat_id,
-                    format!("📁 <b>Файл сохранён в вашей хранилище Obsidian:</b>\n<code>{}/.../{}</code>", engine.config.vault.path, value)
-                )
-                .parse_mode(teloxide::types::ParseMode::Html)
-                .await?;
+                match engine.find_path_by_id(&value).await {
+                    Ok(path) => {
+                        bot.send_message(
+                            chat_id,
+                            format!("🔍 <b>Детали записи:</b>\n📁 Путь: <code>{}</code>", path)
+                        ).parse_mode(teloxide::types::ParseMode::Html).await?;
+                    }
+                    Err(_) => {
+                        bot.send_message(chat_id, "❌ Запись не найдена в базе").await?;
+                    }
+                }
+            }
+        }
+        "delete" => {
+            if let Some(chat_id) = chat_id {
+                match engine.find_path_by_id(&value).await {
+                    Ok(path) => {
+                        let _ = engine.delete_entry(&path).await;
+                        bot.send_message(chat_id, "🗑 Запись успешно удалена из Obsidian.").await?;
+                    }
+                    Err(_) => {
+                        bot.send_message(chat_id, "❌ Запись не найдена (возможно, уже удалена)").await?;
+                    }
+                }
+            }
+        }
+        "edit" => {
+            if let Some(chat_id) = chat_id {
+                state_manager.set(user_id, crate::state::UserState::Editing {
+                    entry_id: value.clone(),
+                    field: "raw_text".to_string()
+                }).await;
+                bot.send_message(chat_id, "📝 Отправьте текст для дополнения этой записи (он будет добавлен в конец файла):").await?;
             }
         }
         _ => {
