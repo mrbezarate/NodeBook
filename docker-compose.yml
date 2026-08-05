@@ -1,45 +1,24 @@
-version: "3.8"
-
 services:
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ./ollama_data:/root/.ollama
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-
-  brain:
-    build: .
-    container_name: brain_bot
-    restart: always
-    depends_on:
-      - ollama
+  brain-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: daybook-brain-bot
+    restart: unless-stopped
     env_file:
       - .env
     environment:
-      - TZ=Asia/Almaty
+      - VAULT_PATH=/app/data
       - RUST_LOG=info
+    ports:
+      - "8080:8080"
     volumes:
-      - ./base:/app/base
-      - ./config.toml:/app/config.toml:ro
+      - ./data:/app/data
       - ./logs:/app/logs
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
-  sync:
-    image: alpine
-    container_name: brain_sync
-    restart: always
-    volumes:
-      - ./base:/src:ro
-      - /mnt/c/Users/mrbez/Documents/Dylay:/dest
-    command: >
-      sh -c 'apk add --no-cache rsync inotify-tools && rsync -a --delete /src/ /dest/ && while inotifywait -r -e modify,create,delete,move /src/; do sleep 1; rsync -a --delete /src/ /dest/; done'
+      - ./config.toml:/app/config.toml
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

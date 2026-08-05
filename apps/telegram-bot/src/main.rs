@@ -149,7 +149,8 @@ async fn main() -> anyhow::Result<()> {
     let identity_resolver: Arc<dyn brain_core::traits::IdentityResolver> = semantic_validator.clone();
     
     let vault_store = Arc::new(brain_vault::EntityVault::new(config.vault.path.clone()));
-    let knowledge_store = Arc::new(brain_core::db::SqliteKnowledgeStore::new("brain.db")?);
+    let db_path = std::path::PathBuf::from(&config.vault.path).join("brain.db");
+    let knowledge_store = Arc::new(brain_core::db::SqliteKnowledgeStore::new(db_path.to_str().unwrap())?);
 
     let graph_path = std::path::PathBuf::from(&config.vault.path).join(".brain_graph.json");
     let graph = match brain_graph::KnowledgeGraph::load(graph_path.to_str().unwrap()).await {
@@ -202,6 +203,7 @@ async fn main() -> anyhow::Result<()> {
         .build()?;
 
     let engine = Arc::new(engine);
+    engine.start_workers();
     let state_manager = Arc::new(StateManager::new());
 
     tracing::info!("🧠 Brain bot initialized");
@@ -295,6 +297,53 @@ async fn main() -> anyhow::Result<()> {
         }
     );
     
+
+    // Start notification worker
+    {
+        use brain_core::traits::RawEventStore;
+        let bot_clone = bot.clone();
+        let engine_clone = engine.clone();
+        let store_clone = knowledge_store.clone();
+        tokio::spawn(async move {
+            loop {
+                match store_clone.next_unprocessed_event("EntryStored").await {
+                    Ok(Some(record)) => {
+                        if let Ok(Some(entry)) = engine_clone.rebuild(&record.aggregate_id).await {
+                            if let brain_common::EntrySource::Telegram { user_id, processing_msg_id, .. } = entry.source {
+                                let chat_id = teloxide::types::ChatId(user_id as i64);
+                                use teloxide::requests::Requester;
+                                
+                                let tags_str = entry.classification.tags.iter().map(|t| format!("#{}", t)).collect::<Vec<_>>().join(" ");
+                                let mut reply = format!("✅ <b>Сохранено:</b> {}\n\n{}\n\n📂 {}\n🏷 {}", 
+                                    entry.classification.suggested_title,
+                                    entry.classification.summary,
+                                    entry.classification.area,
+                                    tags_str
+                                );
+
+                                if let brain_common::SourcingEvent::EntryStored { path } = record.event {
+                                    reply.push_str(&format!("\n📝 <code>{}</code>", path));
+                                }
+
+                                if let Some(msg_id) = processing_msg_id {
+                                    let _ = bot_clone.edit_message_text(chat_id, teloxide::types::MessageId(msg_id as i32), reply)
+                                        .parse_mode(teloxide::types::ParseMode::Html)
+                                        .await;
+                                } else {
+                                    let _ = bot_clone.send_message(chat_id, reply)
+                                        .parse_mode(teloxide::types::ParseMode::Html)
+                                        .await;
+                                }
+                            }
+                        }
+                    }
+                    Ok(None) => tokio::time::sleep(std::time::Duration::from_millis(500)).await,
+                    Err(_) => tokio::time::sleep(std::time::Duration::from_secs(1)).await,
+                }
+            }
+        });
+    }
+
     let handler = dptree::entry()
         .branch(message_handler)
         .branch(callback_handler);

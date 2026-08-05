@@ -108,25 +108,9 @@ pub async fn handle_message(
             };
             
             match engine.ingest(text, source).await {
-                Ok((_, id)) => {
-                    // Fast CQRS poll: try to get projection, or fallback to simple message
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await; // give projection worker a tiny headstart
-                    
-                    let mut reply_text = "✅ Принято в обработку.".to_string();
-                    if let Ok(Some(proj)) = engine.get_entry(&id).await {
-                        let tags = proj.tags.join(", ");
-                        reply_text = format!("✅ Записано.\n{}",
-                            if !proj.summary.is_empty() { proj.summary.clone() } else { "Ожидает анализ...".to_string() }
-                        );
-                        if !tags.is_empty() {
-                            reply_text.push_str(&format!("\n🏷 {}", tags));
-                        }
-                    }
-
-                    let _ = bot.delete_message(chat_id, processing_msg.id).await;
-                    bot.send_message(chat_id, reply_text)
-                        .parse_mode(teloxide::types::ParseMode::Html)
-                        .await?;
+                Ok((_, _id)) => {
+                    // Pipeline runs asynchronously and the worker will edit the processing_msg_id
+                    // Just return and leave the processing message as is!
                 }
                 Err(e) => {
                     let _ = bot.delete_message(chat_id, processing_msg.id).await;
