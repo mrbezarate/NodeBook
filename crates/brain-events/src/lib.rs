@@ -1,9 +1,8 @@
-use brain_common::{Result, BrainError};
+use brain_common::Result;
 use async_trait::async_trait;
-use brain_common::EntryId;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
@@ -66,6 +65,10 @@ impl JsonlEventLogger {
             log_file,
             writer: Mutex::new(Some(tokio::io::BufWriter::new(file))),
         })
+    }
+
+    pub fn log_file(&self) -> &std::path::Path {
+        &self.log_file
     }
 }
 

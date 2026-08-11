@@ -12,6 +12,7 @@ pub async fn handle_callback(
     engine: Arc<BrainEngine>,
     state_manager: Arc<StateManager>,
     analytics_engine: Arc<brain_analytics::engine::LifeAnalyticsEngine>,
+    vault_registry: Arc<tokio::sync::RwLock<brain_vault::VaultRegistry>>,
 ) -> anyhow::Result<()> {
     let user_id = query.from.id.0;
     let chat_id = query.message.as_ref().map(|m| m.chat().id);
@@ -39,6 +40,13 @@ pub async fn handle_callback(
     };
     
     match prefix.as_str() {
+        "vault" => {
+            if let (Some(chat_id), Some(message_id)) = (chat_id, message_id) {
+                crate::handlers::vault::handle_vault_callback(
+                    &bot, chat_id, message_id, user_id, &value, &engine, &state_manager, &vault_registry
+                ).await?;
+            }
+        }
         "diary" | "metric" | "exercise" => {
             if let (Some(chat_id), Some(message_id)) = (chat_id, message_id) {
                 crate::handlers::diary::handle_diary_callback(

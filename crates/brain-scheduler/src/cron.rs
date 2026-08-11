@@ -1,5 +1,5 @@
 //! Cron-планировщик.
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

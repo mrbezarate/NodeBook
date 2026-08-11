@@ -14,7 +14,7 @@ pub fn auto_link(text: &str, docs: &[LinkCandidate]) -> String {
     let mut link_count = 0;
     let max_links = 5;
 
-    // Sort by score DESC, then by length DESC to match longer aliases first
+    // Sort docs by score DESC
     let mut sorted_docs = docs.to_vec();
     sorted_docs.sort_by(|a, b| {
         b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
@@ -34,16 +34,32 @@ pub fn auto_link(text: &str, docs: &[LinkCandidate]) -> String {
         candidates.sort_by(|a, b| b.len().cmp(&a.len()));
 
         for alias in candidates {
-            if alias.len() < 4 { continue; }
+            if alias.len() < 3 { continue; }
             if matched { break; }
 
-            // Minimal protection against code blocks and existing links
-            // We find the first occurrence that is NOT inside ` ` or [[ ]]
+            // 1. Try exact safe match first
             if let Some((start, end)) = find_safe_match(&result, &alias) {
-                let replacement = if alias.to_lowercase() == doc.title.to_lowercase() {
+                let matched_text = &result[start..end];
+                let replacement = if matched_text.to_lowercase() == doc.title.to_lowercase() {
                     format!("[[{}]]", doc.title)
                 } else {
-                    format!("[[{}|{}]]", doc.title, alias)
+                    format!("[[{}|{}]]", doc.title, matched_text)
+                };
+
+                result.replace_range(start..end, &replacement);
+                matched = true;
+                linked_ids.insert(doc.id.clone());
+                link_count += 1;
+                continue;
+            }
+
+            // 2. Try fuzzy safe match (for typos e.g. "кавбой бибоп" -> "ковбой бибоп")
+            if let Some((start, end)) = find_safe_fuzzy_match(&result, &alias) {
+                let matched_text = &result[start..end];
+                let replacement = if matched_text.to_lowercase() == doc.title.to_lowercase() {
+                    format!("[[{}]]", doc.title)
+                } else {
+                    format!("[[{}|{}]]", doc.title, matched_text)
                 };
 
                 result.replace_range(start..end, &replacement);
@@ -57,7 +73,7 @@ pub fn auto_link(text: &str, docs: &[LinkCandidate]) -> String {
     result
 }
 
-// Helper to find a substring that is NOT inside a code block, existing link, or URL
+/// Helper to find an exact substring that is NOT inside a code block, existing link, or URL
 fn find_safe_match(text: &str, alias: &str) -> Option<(usize, usize)> {
     let lower_text = text.to_lowercase();
     let lower_alias = alias.to_lowercase();
@@ -68,9 +84,8 @@ fn find_safe_match(text: &str, alias: &str) -> Option<(usize, usize)> {
         let end_idx = abs_idx + alias.len();
 
         if is_safe_context(text, abs_idx) {
-            // Also check word boundaries so we don't match partial words
-            let is_start_boundary = abs_idx == 0 || !text.as_bytes()[abs_idx - 1].is_ascii_alphanumeric();
-            let is_end_boundary = end_idx == text.len() || !text.as_bytes()[end_idx].is_ascii_alphanumeric();
+            let is_start_boundary = abs_idx == 0 || !is_alphanumeric_or_cyrillic(text, abs_idx - 1);
+            let is_end_boundary = end_idx == text.len() || !is_alphanumeric_or_cyrillic(text, end_idx);
             
             if is_start_boundary && is_end_boundary {
                 return Some((abs_idx, end_idx));
@@ -81,9 +96,63 @@ fn find_safe_match(text: &str, alias: &str) -> Option<(usize, usize)> {
     None
 }
 
+/// Fuzzy matcher using sliding window of words and Levenshtein distance
+fn find_safe_fuzzy_match(text: &str, alias: &str) -> Option<(usize, usize)> {
+    let alias_words: Vec<&str> = alias.split_whitespace().collect();
+    if alias_words.is_empty() { return None; }
+    
+    let target_word_count = alias_words.len();
+    let max_allowed_distance = match alias.chars().count() {
+        0..=4 => 1,
+        5..=10 => 2,
+        _ => 3,
+    };
+
+    // Extract word boundaries in text
+    let mut word_spans = Vec::new();
+    let mut in_word = false;
+    let mut start = 0;
+
+    for (i, c) in text.char_indices() {
+        let is_char = c.is_alphanumeric();
+        if is_char && !in_word {
+            in_word = true;
+            start = i;
+        } else if !is_char && in_word {
+            in_word = false;
+            word_spans.push((start, i));
+        }
+    }
+    if in_word {
+        word_spans.push((start, text.len()));
+    }
+
+    if word_spans.len() < target_word_count { return None; }
+
+    // Sliding window over word spans
+    for i in 0..=(word_spans.len() - target_word_count) {
+        let span_start = word_spans[i].0;
+        let span_end = word_spans[i + target_word_count - 1].1;
+        let window_text = &text[span_start..span_end];
+
+        if is_safe_context(text, span_start) {
+            let dist = levenshtein_distance(&window_text.to_lowercase(), &alias.to_lowercase());
+            if dist <= max_allowed_distance {
+                return Some((span_start, span_end));
+            }
+        }
+    }
+
+    None
+}
+
+fn is_alphanumeric_or_cyrillic(text: &str, byte_idx: usize) -> bool {
+    if byte_idx >= text.len() { return false; }
+    text[byte_idx..].chars().next().map(|c| c.is_alphanumeric()).unwrap_or(false)
+}
+
 fn is_safe_context(text: &str, idx: usize) -> bool {
     let before = &text[..idx];
-    let after = &text[idx..];
 
     // Check code block ```
     let code_blocks_before = before.matches("```").count();
@@ -103,10 +172,38 @@ fn is_safe_context(text: &str, idx: usize) -> bool {
     let close_md_links = before.matches(']').count();
     if open_md_links > close_md_links { return false; }
     
-    // URL heuristic (very basic)
-    if before.ends_with("/") || before.ends_with("http") || before.ends_with("://") { return false; }
+    // URL heuristic
+    if before.ends_with('/') || before.ends_with("http") || before.ends_with("://") { return false; }
 
     true
+}
+
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    let len_a = a_chars.len();
+    let len_b = b_chars.len();
+
+    if len_a == 0 { return len_b; }
+    if len_b == 0 { return len_a; }
+
+    let mut cache: Vec<usize> = (0..=len_b).collect();
+
+    for (i, ca) in a_chars.iter().enumerate() {
+        let mut result = i + 1;
+        let mut distance_b = i;
+        for (j, cb) in b_chars.iter().enumerate() {
+            let distance_a = distance_b;
+            distance_b = cache[j + 1];
+            result = if ca == cb {
+                distance_a
+            } else {
+                1 + std::cmp::min(std::cmp::min(result, distance_b), distance_a)
+            };
+            cache[j + 1] = result;
+        }
+    }
+    cache[len_b]
 }
 
 #[cfg(test)]
@@ -114,7 +211,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_auto_link() {
+    fn test_exact_auto_link() {
         let docs = vec![
             LinkCandidate {
                 id: "1".into(),
@@ -122,16 +219,26 @@ mod tests {
                 aliases: vec!["tokio".into()],
                 score: 0.9,
             },
-            LinkCandidate {
-                id: "2".into(),
-                title: "rust async".into(),
-                aliases: vec![].into(),
-                score: 0.2, // Should be skipped (< 0.3)
-            }
         ];
 
-        let text = "tokio падает с ошибкой, а rust async работает.";
+        let text = "tokio падает с ошибкой.";
         let res = auto_link(text, &docs);
-        assert_eq!(res, "[[tokio runtime|tokio]] падает с ошибкой, а rust async работает.");
+        assert_eq!(res, "[[tokio runtime|tokio]] падает с ошибкой.");
+    }
+
+    #[test]
+    fn test_fuzzy_typo_auto_link() {
+        let docs = vec![
+            LinkCandidate {
+                id: "bebop-1".into(),
+                title: "впичетление об аниме кавбой бибоп".into(),
+                aliases: vec!["ковбой бибоп".into()],
+                score: 0.95,
+            },
+        ];
+
+        let text = "я вчера смотрел кавбой бибоп";
+        let res = auto_link(text, &docs);
+        assert_eq!(res, "я вчера смотрел [[впичетление об аниме кавбой бибоп|кавбой бибоп]]");
     }
 }

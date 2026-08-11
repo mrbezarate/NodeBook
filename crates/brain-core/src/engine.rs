@@ -12,13 +12,19 @@ pub struct BrainEngine {
     pub config: BrainConfig,
     pipeline: Arc<AgenticPipeline>,
     vault: Arc<dyn VaultStorage>,
+    #[allow(dead_code)]
     graph: Option<Arc<dyn GraphStore>>,
     embeddings: Option<Arc<dyn EmbeddingProvider>>,
     vector_store: Option<Arc<dyn crate::traits::VectorStorage>>,
+    #[allow(dead_code)]
     event_bus: Option<Arc<dyn brain_events::EventBus>>,
+    #[allow(dead_code)]
     context_manager: Option<Arc<dyn crate::traits::ContextManager>>,
+    #[allow(dead_code)]
     entity_validator: Option<Arc<dyn crate::traits::EntityValidator>>,
+    #[allow(dead_code)]
     identity_resolver: Option<Arc<dyn crate::traits::IdentityResolver>>,
+    #[allow(dead_code)]
     knowledge_store: Option<Arc<dyn crate::traits::KnowledgeStore>>,
     raw_event_store: Option<Arc<dyn crate::traits::RawEventStore>>,
 }
@@ -203,7 +209,9 @@ impl BrainEngine {
                                         final_enriched = crate::linking::auto_link(&final_enriched, &candidates);
                                     }
 
+                                    let title = entry.classification.suggested_title.clone();
                                     let ev = brain_common::SourcingEvent::LlmProcessed { 
+                                        title: Some(title),
                                         summary: final_summary, 
                                         tags: entry.classification.tags,
                                         enriched_text: Some(final_enriched),
@@ -313,7 +321,10 @@ impl BrainEngine {
                             brain_common::SourcingEvent::MessageIngested { text, .. } => {
                                 entry.raw = text;
                             }
-                            brain_common::SourcingEvent::LlmProcessed { summary, tags, enriched_text: _ } => {
+                            brain_common::SourcingEvent::LlmProcessed { title, summary, tags, enriched_text: _ } => {
+                                if let Some(t) = title {
+                                    entry.title = t;
+                                }
                                 entry.summary = summary;
                                 entry.tags = tags.clone();
                                 
@@ -372,7 +383,10 @@ impl BrainEngine {
                         entry.raw_text = text;
                         entry.source = source;
                     }
-                    brain_common::SourcingEvent::LlmProcessed { summary, tags, enriched_text } => {
+                    brain_common::SourcingEvent::LlmProcessed { title, summary, tags, enriched_text } => {
+                        if let Some(t) = title {
+                            entry.classification.suggested_title = t;
+                        }
                         entry.classification.summary = summary;
                         entry.classification.tags = tags;
                         entry.classification.enriched_text = enriched_text;

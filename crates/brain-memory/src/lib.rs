@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use brain_common::{BrainError, Result, SearchResult};
+use brain_common::Result;
 use brain_core::traits::{ContextManager, ActiveContext, VaultStorage, VectorStorage, EmbeddingProvider};
 use std::sync::Arc;
 

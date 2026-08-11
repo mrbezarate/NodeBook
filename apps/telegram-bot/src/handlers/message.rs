@@ -4,7 +4,6 @@ use std::sync::Arc;
 use brain_core::engine::BrainEngine;
 use brain_common::EntrySource;
 use crate::state::{StateManager, UserState};
-use crate::keyboard::inline::entry_actions_keyboard;
 
 /// Обработать входящее текстовое сообщение.
 pub async fn handle_message(
@@ -13,6 +12,7 @@ pub async fn handle_message(
     engine: Arc<BrainEngine>,
     state_manager: Arc<StateManager>,
     _analytics_engine: Arc<brain_analytics::engine::LifeAnalyticsEngine>,
+    vault_registry: Arc<tokio::sync::RwLock<brain_vault::VaultRegistry>>,
 ) -> anyhow::Result<()> {
     let text = match msg.text() {
         Some(t) => t,
@@ -35,7 +35,7 @@ pub async fn handle_message(
     // Check if text corresponds to main menu buttons
     match text {
         "📖 Дневник дня" => {
-            crate::handlers::command::handle_command(&bot, &msg, "/diary", &engine, &state_manager).await?;
+            crate::handlers::command::handle_command(&bot, &msg, "/diary", &engine, &state_manager, &vault_registry).await?;
             return Ok(());
         }
         "📊 Аналитика" | "/analytics" => {
@@ -43,11 +43,15 @@ pub async fn handle_message(
             return Ok(());
         }
         "🔍 Поиск" => {
-            crate::handlers::command::handle_command(&bot, &msg, "/search", &engine, &state_manager).await?;
+            crate::handlers::command::handle_command(&bot, &msg, "/search", &engine, &state_manager, &vault_registry).await?;
             return Ok(());
         }
         "📅 Запись за сегодня" => {
-            crate::handlers::command::handle_command(&bot, &msg, "/today", &engine, &state_manager).await?;
+            crate::handlers::command::handle_command(&bot, &msg, "/today", &engine, &state_manager, &vault_registry).await?;
+            return Ok(());
+        }
+        "🗄️ База знаний" => {
+            crate::handlers::vault::send_vault_menu(&bot, chat_id, &vault_registry).await?;
             return Ok(());
         }
         "/viz" => {
@@ -55,7 +59,7 @@ pub async fn handle_message(
             return Ok(());
         }
         "ℹ️ Справка" => {
-            crate::handlers::command::handle_command(&bot, &msg, "/help", &engine, &state_manager).await?;
+            crate::handlers::command::handle_command(&bot, &msg, "/help", &engine, &state_manager, &vault_registry).await?;
             return Ok(());
         }
         _ => {}
@@ -63,7 +67,7 @@ pub async fn handle_message(
 
     // Check if it's a command starting with /
     if text.starts_with('/') {
-        crate::handlers::command::handle_command(&bot, &msg, text, &engine, &state_manager).await?;
+        crate::handlers::command::handle_command(&bot, &msg, text, &engine, &state_manager, &vault_registry).await?;
         return Ok(());
     }
     
@@ -77,6 +81,9 @@ pub async fn handle_message(
         UserState::WaitingForSearch => {
             state_manager.reset(user_id).await;
             crate::handlers::command::execute_search(&bot, chat_id, text, &engine).await?;
+        }
+        UserState::WaitingForNewVaultName | UserState::WaitingForRenameVault => {
+            crate::handlers::vault::handle_vault_text_input(&bot, &msg, user_id, text, user_state, &state_manager, &vault_registry).await?;
         }
         UserState::Editing { entry_id, field: _ } => {
             state_manager.reset(user_id).await;

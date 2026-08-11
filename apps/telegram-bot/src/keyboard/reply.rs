@@ -13,6 +13,7 @@ pub fn main_menu_keyboard() -> KeyboardMarkup {
             KeyboardButton::new("📅 Запись за сегодня"),
         ],
         vec![
+            KeyboardButton::new("🗄️ База знаний"),
             KeyboardButton::new("ℹ️ Справка"),
         ],
     ])

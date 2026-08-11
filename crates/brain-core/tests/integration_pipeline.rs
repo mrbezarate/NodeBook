@@ -23,7 +23,7 @@ impl AiProvider for MockAiProvider {
         Ok(r#"{
             "title": "Multiplayer Feature",
             "summary": "Project supports multiplayer",
-            "entities": ["Space Cowboy", "Multiplayer"],
+            "entities": ["Multiplayer Feature"],
             "tags": ["idea", "feature"],
             "confidence": 0.95
         }"#.into())
@@ -38,9 +38,13 @@ struct MockIdentityResolver;
 
 #[async_trait]
 impl IdentityResolver for MockIdentityResolver {
-    async fn resolve(&self, _query: &str) -> Result<Option<ResolutionResult>> {
-        // Всегда возвращаем новую сущность с низким confidence или ничего, чтобы создать новую
-        Ok(None)
+    async fn resolve(&self, query: &str) -> Result<Option<ResolutionResult>> {
+        let entity = Entity::new(query, EntityType::Concept);
+        Ok(Some(ResolutionResult {
+            entity,
+            confidence: 0.9,
+            matched_by: brain_common::MatchMethod::Exact,
+        }))
     }
 
     async fn register_alias(&self, _canonical_id: &str, _alias: &str) -> Result<()> {
@@ -76,6 +80,7 @@ async fn test_full_vertical_slice() {
         projection,
         store.clone(),
         renderer,
+        None,
     );
 
     // 3. Создаем RawEvent и Job
@@ -160,6 +165,7 @@ async fn test_idempotency() {
         Arc::new(SimpleProjectionEngine::new(store.clone())),
         store.clone(),
         renderer,
+        None,
     );
 
     let event_id = Uuid::new_v4().to_string();
@@ -229,9 +235,9 @@ async fn test_crash_recovery() {
 
     // Эмуляция падения
     let obs = brain_common::Observation {
-        id: format!("obs_{}", event_id),
+        id: format!("obs_{}_concept_multiplayer_feature", event_id),
         raw_event_id: event_id.clone(),
-        entity_id: format!("entity_for_{}", event_id),
+        entity_id: "concept_multiplayer_feature".into(),
         fact: "Crash recovery test".into(),
         confidence: 0.95,
         schema_version: 1,

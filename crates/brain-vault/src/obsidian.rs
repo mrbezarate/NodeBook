@@ -1,11 +1,11 @@
 //! ObsidianVault — реализация VaultStorage.
 use async_trait::async_trait;
-use brain_common::{BrainEntry, BrainError, Result, SearchResult, EntryId};
+use brain_common::{BrainEntry, BrainError, Result, SearchResult};
 use brain_config::ParaConfig;
 use brain_core::VaultStorage;
 use crate::markdown::MarkdownBuilder;
 use crate::para::VaultParaRouter;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use walkdir::WalkDir;
 use std::sync::Arc;
 use brain_indexer::BrainIndexer;

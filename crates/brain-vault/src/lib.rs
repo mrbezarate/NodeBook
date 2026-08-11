@@ -7,6 +7,9 @@ pub mod para;
 pub mod template;
 pub mod wikilink;
 
+pub mod registry;
+
 pub use obsidian::ObsidianVault;
 pub use para::VaultParaRouter;
 pub use entity_store::EntityVault;
+pub use registry::{VaultRegistry, VaultInfo};

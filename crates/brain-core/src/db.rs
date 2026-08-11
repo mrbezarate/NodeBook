@@ -52,6 +52,7 @@ impl SqliteKnowledgeStore {
 
             CREATE TABLE IF NOT EXISTS brain_entries (
                 id TEXT PRIMARY KEY,
+                title TEXT,
                 raw TEXT,
                 summary TEXT,
                 tags TEXT,
@@ -500,14 +501,12 @@ impl RawEventStore for SqliteKnowledgeStore {
         ).optional().unwrap_or(None);
 
         let mut job_status = String::new();
-        let mut job_error = None;
         if let Some((jtype, status, error)) = job {
             job_status = status.clone();
-            job_error = error;
             if status == "failed" {
                 trace.push_str("Job Status:\n");
                 trace.push_str(&format!("{} (failed)\n", jtype));
-                if let Some(err_text) = &job_error {
+                if let Some(err_text) = &error {
                     trace.push_str(&format!("Errors:\n{}\n\n", err_text));
                 } else {
                     trace.push_str("Errors:\n<No error details stored>\n\n");
@@ -707,7 +706,6 @@ impl RawEventStore for SqliteKnowledgeStore {
             brain_common::SourcingEvent::EmbeddingProcessRequested { .. } => "EmbeddingProcessRequested",
             brain_common::SourcingEvent::EmbeddingGenerated { .. } => "EmbeddingGenerated",
             brain_common::SourcingEvent::EntryStored { .. } => "EntryStored",
-            _ => "Other",
         };
         
         with_retry(|| {
@@ -808,20 +806,22 @@ impl RawEventStore for SqliteKnowledgeStore {
 
     async fn load_projection(&self, id: &str) -> Result<Option<brain_common::ProjectionEntry>> {
         let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
-        let mut stmt = conn.prepare("SELECT id, raw, summary, tags, is_fallback, created_at FROM brain_entries WHERE id = ?1").map_err(|e| BrainError::Database(e.to_string()))?;
+        let mut stmt = conn.prepare("SELECT id, title, raw, summary, tags, is_fallback, created_at FROM brain_entries WHERE id = ?1").map_err(|e| BrainError::Database(e.to_string()))?;
         let res = stmt.query_row(rusqlite::params![id], |row| {
             let id: String = row.get(0)?;
-            let raw: String = row.get(1)?;
-            let summary: String = row.get(2)?;
-            let tags_str: String = row.get(3)?;
-            let is_fallback_int: i32 = row.get(4)?;
-            let created_at: String = row.get(5)?;
+            let title: String = row.get::<_, Option<String>>(1)?.unwrap_or_default();
+            let raw: String = row.get(2)?;
+            let summary: String = row.get(3)?;
+            let tags_str: String = row.get(4)?;
+            let is_fallback_int: i32 = row.get(5)?;
+            let created_at: String = row.get(6)?;
             
             let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
             let date_time = chrono::DateTime::parse_from_rfc3339(&created_at).map_err(|_| rusqlite::Error::InvalidQuery)?.with_timezone(&chrono::Utc);
             
             Ok(brain_common::ProjectionEntry {
                 id,
+                title,
                 raw,
                 summary,
                 tags,
@@ -840,9 +840,9 @@ impl RawEventStore for SqliteKnowledgeStore {
         
         with_retry(|| {
             conn.execute(
-                "INSERT OR REPLACE INTO brain_entries (id, raw, summary, tags, is_fallback) 
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![entry.id, entry.raw, entry.summary, tags_str, is_fallback_int],
+                "INSERT OR REPLACE INTO brain_entries (id, title, raw, summary, tags, is_fallback) 
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![entry.id, entry.title, entry.raw, entry.summary, tags_str, is_fallback_int],
             )
         })?;
         Ok(())

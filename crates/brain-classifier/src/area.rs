@@ -4,7 +4,10 @@ use brain_common::{Area, EntryType, Result};
 use brain_core::{AiProvider, AreaDetector};
 use std::sync::Arc;
 
-pub struct HybridAreaDetector { ai: Option<Arc<dyn AiProvider>> }
+pub struct HybridAreaDetector {
+    #[allow(dead_code)]
+    ai: Option<Arc<dyn AiProvider>>,
+}
 
 impl HybridAreaDetector {
     pub fn new(ai: Option<Arc<dyn AiProvider>>) -> Self { Self { ai } }

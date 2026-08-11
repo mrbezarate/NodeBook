@@ -27,3 +27,29 @@ pub fn entry_actions_keyboard(entry_id: &str) -> InlineKeyboardMarkup {
         ]
     ])
 }
+
+/// Клавиатура управления базами знаний / хранилищами.
+pub fn vault_menu_keyboard(registry: &brain_vault::VaultRegistry) -> InlineKeyboardMarkup {
+    let mut rows = vec![
+        vec![
+            InlineKeyboardButton::callback("➕ Создать базу", "vault:create"),
+            InlineKeyboardButton::callback("✏️ Переименовать", "vault:rename"),
+        ],
+    ];
+
+    let mut vault_buttons = Vec::new();
+    for v in &registry.vaults {
+        let label = if v.id == registry.active_vault_id {
+            format!("✅ {}", v.name)
+        } else {
+            format!("📁 {}", v.name)
+        };
+        vault_buttons.push(InlineKeyboardButton::callback(label, format!("vault:switch:{}", v.id)));
+    }
+
+    for chunk in vault_buttons.chunks(2) {
+        rows.push(chunk.to_vec());
+    }
+
+    InlineKeyboardMarkup::new(rows)
+}

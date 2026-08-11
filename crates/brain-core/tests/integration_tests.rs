@@ -1,4 +1,4 @@
-use brain_common::{Entity, EntityType, SemanticLink, EntrySource};
+use brain_common::{Entity, EntityType, SemanticLink};
 use brain_core::db::SqliteKnowledgeStore;
 use brain_core::traits::KnowledgeStore;
 use std::fs;

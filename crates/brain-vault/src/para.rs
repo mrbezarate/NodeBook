@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use brain_common::{Area, EntryType, ParaCategory, Result};
 use brain_config::ParaConfig;
 use brain_core::ParaRouter;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 pub struct VaultParaRouter { pub config: ParaConfig, pub vault_root: PathBuf }
 
@@ -36,10 +36,9 @@ impl ParaRouter for VaultParaRouter {
             EntryType::Project | EntryType::Task | EntryType::Goal => ParaCategory::Projects,
             EntryType::Habit | EntryType::Diary | EntryType::Finance => ParaCategory::Areas,
             EntryType::Knowledge | EntryType::Book | EntryType::Article
-            | EntryType::Link | EntryType::Quote => ParaCategory::Resources,
-            EntryType::Idea | EntryType::Thought | EntryType::Problem
+            | EntryType::Link | EntryType::Quote
+            | EntryType::Idea | EntryType::Thought | EntryType::Problem
             | EntryType::Solution | EntryType::Person => ParaCategory::Resources,
-            _ => ParaCategory::Inbox,
         };
         Ok(category)
     }

@@ -11,6 +11,7 @@ pub async fn handle_command(
     text: &str,
     engine: &Arc<BrainEngine>,
     state_manager: &Arc<StateManager>,
+    vault_registry: &Arc<tokio::sync::RwLock<brain_vault::VaultRegistry>>,
 ) -> anyhow::Result<()> {
     let mut parts = text.split_whitespace();
     let cmd = parts.next().unwrap_or("");
@@ -31,6 +32,9 @@ pub async fn handle_command(
                 .parse_mode(teloxide::types::ParseMode::Html)
                 .reply_markup(main_menu_keyboard())
                 .await?;
+        }
+        "/base" | "/vault" => {
+            crate::handlers::vault::send_vault_menu(bot, chat_id, vault_registry).await?;
         }
         "/diary" => {
             crate::handlers::diary::start_diary(bot, chat_id, user_id, engine, state_manager).await?;
@@ -215,6 +219,7 @@ fn cmd_start() -> String {
 fn cmd_help() -> String {
     "📋 <b>Справка и список команд:</b>\n\n\
     /start — Главное меню и приветствие\n\
+    /base — Управление хранилищами и базами знаний\n\
     /diary — Запустить вечерний обзор дня\n\
     /search — Поиск по вашей базе знаний\n\
     /today — Посмотреть сегодняшнюю дневниковую запись\n\

@@ -26,6 +26,7 @@ struct GenerateRequest<'a> {
 struct GenerateResponse { 
     response: String,
     #[serde(default)]
+    #[allow(dead_code)]
     thinking: Option<String>,
 }
 

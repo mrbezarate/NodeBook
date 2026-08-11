@@ -1,4 +1,4 @@
-use brain_common::{Result, BrainError, Entity, EntityType};
+use brain_common::{Result, Entity, EntityType};
 use brain_core::traits::{EmbeddingProvider, VectorStorage, EntityValidator};
 use std::sync::Arc;
 use async_trait::async_trait;

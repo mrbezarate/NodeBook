@@ -25,9 +25,17 @@ birth_date = "2009-01-24"         # ← Дата рождения (24 январ
 
 # ── AI ───────────────────────────────────────────────────────
 [ai]
-provider = "ollama"
+provider = "gemini"
 temperature = 0.3
 max_tokens = 512
+
+[ai.gemini]
+api_key = ""
+model = "gemini-2.5-flash"
+heavy_model = "gemini-2.5-flash"
+lite_model = "gemini-2.5-flash-lite"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+embedding_model = "text-embedding-004"
 
 [ai.ollama]
 base_url = "http://ollama:11434"

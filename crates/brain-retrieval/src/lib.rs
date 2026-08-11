@@ -1,8 +1,6 @@
 use anyhow::Result;
-use brain_common::EntryId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
 
 /// Vector representation with metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]

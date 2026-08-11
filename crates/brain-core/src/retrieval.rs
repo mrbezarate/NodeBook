@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use brain_common::Result;
 use crate::traits::{RawEventStore, VectorStorage, EmbeddingProvider};
 use tracing::info;
 
@@ -204,9 +203,10 @@ impl HybridRetriever {
             if !entry.summary.is_empty() {
                 context_text.push_str(&format!("- [{}] {}\n", entry.tags.join(", "), entry.summary));
                 
+                let display_title = if entry.title.is_empty() { id.clone() } else { entry.title.clone() };
                 candidates.push(crate::linking::LinkCandidate {
                     id: id.clone(),
-                    title: id.clone(),
+                    title: display_title,
                     aliases: entry.tags.clone(),
                     score,
                 });

@@ -19,6 +19,7 @@ struct AgenticOutput {
 pub struct AgenticPipeline {
     ai_provider: Arc<dyn AiProvider>,
     entity_extractor: Arc<dyn EntityExtractor>,
+    #[allow(dead_code)]
     vector_store: Arc<dyn VectorStorage>,
     context_manager: Option<Arc<dyn ContextManager>>,
 }
@@ -99,7 +100,7 @@ Output strictly in JSON format matching this schema:
         let mut last_err = String::new();
 
         while retries > 0 {
-            match self.ai_provider.complete(&prompt).await {
+            match self.ai_provider.complete_json(&prompt).await {
                 Ok(json_str) => {
                     match serde_json::from_str::<AgenticOutput>(&json_str) {
                         Ok(result) => {

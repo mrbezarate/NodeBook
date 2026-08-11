@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use brain_common::{BrainError, Entity, Observation, RawEvent, Result, MatchMethod};
+use brain_common::{BrainError, Observation, Result, MatchMethod};
 use crate::traits::{AiProvider, IdentityResolver, KnowledgeStore, ProjectionEngine, RawEventStore, Renderer};
 
 use crate::extractor::Extractor;

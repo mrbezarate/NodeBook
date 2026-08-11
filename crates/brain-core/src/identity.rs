@@ -6,16 +6,16 @@ use strsim::jaro_winkler;
 pub struct CascadedIdentityResolver {
     store: Arc<dyn KnowledgeStore>,
     ai: Arc<dyn AiProvider>,
-    vector_store: Arc<dyn VectorStorage>,
-    embeddings: Arc<dyn EmbeddingProvider>,
+    vector_store: Option<Arc<dyn VectorStorage>>,
+    embeddings: Option<Arc<dyn EmbeddingProvider>>,
 }
 
 impl CascadedIdentityResolver {
     pub fn new(
         store: Arc<dyn KnowledgeStore>, 
         ai: Arc<dyn AiProvider>,
-        vector_store: Arc<dyn VectorStorage>,
-        embeddings: Arc<dyn EmbeddingProvider>,
+        vector_store: Option<Arc<dyn VectorStorage>>,
+        embeddings: Option<Arc<dyn EmbeddingProvider>>,
     ) -> Self {
         Self { store, ai, vector_store, embeddings }
     }
@@ -24,23 +24,20 @@ impl CascadedIdentityResolver {
 #[async_trait::async_trait]
 impl IdentityResolver for CascadedIdentityResolver {
     async fn resolve(&self, query: &str) -> Result<Option<ResolutionResult>> {
-        // Embed the query for semantic search
-        let query_embedding = self.embeddings.embed(query).await?;
-        
-        // Retrieve top 20 semantic candidates
-        let search_results = self.vector_store.search(&query_embedding, 20).await?;
-        
-        if search_results.is_empty() {
-            return Ok(None);
-        }
-
         let mut candidates = Vec::new();
-        for res in search_results {
-            // Check if it's an entity by its vector ID (assuming format "entity:Name")
-            if res.0.starts_with("entity:") {
-                let entity_name = res.0.trim_start_matches("entity:");
-                if let Ok(Some(entity)) = self.store.get_entity(entity_name).await {
-                    candidates.push(entity);
+
+        // Embed the query for semantic search if embeddings & vector store are available
+        if let (Some(ref embeddings), Some(ref vector_store)) = (&self.embeddings, &self.vector_store) {
+            if let Ok(query_embedding) = embeddings.embed(query).await {
+                if let Ok(search_results) = vector_store.search(&query_embedding, 20).await {
+                    for res in search_results {
+                        if res.0.starts_with("entity:") {
+                            let entity_name = res.0.trim_start_matches("entity:");
+                            if let Ok(Some(entity)) = self.store.get_entity(entity_name).await {
+                                candidates.push(entity);
+                            }
+                        }
+                    }
                 }
             }
         }

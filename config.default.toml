@@ -26,9 +26,17 @@ inbox = "Inbox"                         # Входящие до классифи
 
 # ── AI Provider ───────────────────────────────────────────────
 [ai]
-provider = "ollama"                     # "ollama" | "openai" | "none"
+provider = "gemini"                     # "gemini" | "openai" | "ollama" | "none"
 temperature = 0.3                       # Низкая для точной классификации
 max_tokens = 512
+
+[ai.gemini]
+api_key = ""                             # Gemini API Key (or set GEMINI_API_KEY env)
+model = "gemini-2.5-flash"               # Основная быстрая модель
+heavy_model = "gemini-2.5-flash"         # Тяжелая модель
+lite_model = "gemini-2.5-flash-lite"     # Легкая модель
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+embedding_model = "text-embedding-004"
 
 [ai.ollama]
 base_url = "http://localhost:11434"

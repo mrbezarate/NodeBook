@@ -1,9 +1,7 @@
 use async_trait::async_trait;
 use brain_common::{BrainError, Entity, EntityType, Result};
 use brain_core::traits::KnowledgeStore;
-use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
-use crate::frontmatter::Frontmatter;
+use std::path::PathBuf;
 
 pub struct EntityVault {
     root: PathBuf,

@@ -10,6 +10,8 @@ pub enum UserState {
     DiaryReview(EveningReview),
     WaitingForSearch,
     WaitingForReminder,
+    WaitingForNewVaultName,
+    WaitingForRenameVault,
     Editing { entry_id: String, field: String },
 }
 

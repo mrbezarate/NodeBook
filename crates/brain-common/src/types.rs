@@ -255,7 +255,7 @@ pub enum SourcingEvent {
     LlmProcessRequested { text: String, source: EntrySource },
     EmbeddingProcessRequested { text: String },
     
-    LlmProcessed { summary: String, tags: Vec<String>, enriched_text: Option<String> },
+    LlmProcessed { title: Option<String>, summary: String, tags: Vec<String>, enriched_text: Option<String> },
     EmbeddingGenerated { vector_id: String },
     EntryStored { path: String },
     FallbackTriggered { reason: String },
@@ -264,6 +264,7 @@ pub enum SourcingEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectionEntry {
     pub id: String,
+    pub title: String,
     pub raw: String,
     pub summary: String,
     pub tags: Vec<String>,
@@ -275,6 +276,7 @@ impl Default for ProjectionEntry {
     fn default() -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
+            title: "".to_string(),
             raw: "".to_string(),
             summary: "".to_string(),
             tags: vec![],

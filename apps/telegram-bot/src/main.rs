@@ -7,11 +7,8 @@ mod keyboard;
 mod output_sink;
 mod state;
 
-use brain_common::{Classification, EntryType, Result};
 use brain_core::traits::*;
-use brain_core::pipeline::PipelineBuilder;
 use brain_core::engine::BrainEngineBuilder;
-use async_trait::async_trait;
 use std::sync::Arc;
 use crate::state::StateManager;
 
@@ -93,33 +90,57 @@ async fn main() -> anyhow::Result<()> {
         std::process::exit(1);
     }
 
-    // Initialize AI providers
-    let (ai_provider, embeddings, heavy_ai_provider): (Arc<dyn AiProvider>, Arc<dyn EmbeddingProvider>, Arc<dyn AiProvider>) = if config.ai.provider == "openai" {
-        let provider = Arc::new(brain_ai::openai::OpenAiProvider::new(
-            config.ai.openai.base_url.clone(),
-            config.ai.openai.api_key.clone(),
-            config.ai.openai.model.clone(),
-            config.ai.openai.embedding_model.clone(),
-        ));
-        let heavy = Arc::new(brain_ai::openai::OpenAiProvider::new(
-            config.ai.openai.base_url.clone(),
-            config.ai.openai.api_key.clone(),
-            config.ai.openai.heavy_model.clone(),
-            config.ai.openai.embedding_model.clone(),
-        ));
-        (provider.clone(), provider.clone(), heavy.clone())
-    } else {
-        let ollama = Arc::new(brain_ai::ollama::OllamaProvider::new(
-            config.ai.ollama.base_url.clone(),
-            config.ai.ollama.model.clone(),
-            config.ai.ollama.embedding_model.clone(),
-        ));
-        let heavy = Arc::new(brain_ai::ollama::OllamaProvider::new(
-            config.ai.ollama.base_url.clone(),
-            config.ai.ollama.heavy_model.clone(),
-            config.ai.ollama.embedding_model.clone(),
-        ));
-        (ollama.clone(), ollama.clone(), heavy.clone())
+    // Initialize Vault Registry for multi-database management
+    let registry_file = std::path::PathBuf::from("./vaults/registry.json");
+    let registry = brain_vault::VaultRegistry::load_or_create(&registry_file, &config.vault.path);
+    config.vault.path = registry.get_active_path();
+    let vault_registry = Arc::new(tokio::sync::RwLock::new(registry));
+    let (ai_provider, embeddings, heavy_ai_provider): (Arc<dyn AiProvider>, Arc<dyn EmbeddingProvider>, Arc<dyn AiProvider>) = match config.ai.provider.as_str() {
+        "gemini" => {
+            let api_key = std::env::var("GEMINI_API_KEY").unwrap_or_else(|_| config.ai.gemini.api_key.clone());
+            let provider = Arc::new(brain_ai::gemini::GeminiProvider::new(
+                config.ai.gemini.base_url.clone(),
+                api_key.clone(),
+                config.ai.gemini.model.clone(),
+                config.ai.gemini.embedding_model.clone(),
+            ));
+            let heavy = Arc::new(brain_ai::gemini::GeminiProvider::new(
+                config.ai.gemini.base_url.clone(),
+                api_key,
+                config.ai.gemini.heavy_model.clone(),
+                config.ai.gemini.embedding_model.clone(),
+            ));
+            (provider.clone(), provider.clone(), heavy.clone())
+        }
+        "openai" => {
+            let api_key = std::env::var("OPENAI_API_KEY").unwrap_or_else(|_| config.ai.openai.api_key.clone());
+            let provider = Arc::new(brain_ai::openai::OpenAiProvider::new(
+                config.ai.openai.base_url.clone(),
+                api_key.clone(),
+                config.ai.openai.model.clone(),
+                config.ai.openai.embedding_model.clone(),
+            ));
+            let heavy = Arc::new(brain_ai::openai::OpenAiProvider::new(
+                config.ai.openai.base_url.clone(),
+                api_key,
+                config.ai.openai.heavy_model.clone(),
+                config.ai.openai.embedding_model.clone(),
+            ));
+            (provider.clone(), provider.clone(), heavy.clone())
+        }
+        _ => {
+            let ollama = Arc::new(brain_ai::ollama::OllamaProvider::new(
+                config.ai.ollama.base_url.clone(),
+                config.ai.ollama.model.clone(),
+                config.ai.ollama.embedding_model.clone(),
+            ));
+            let heavy = Arc::new(brain_ai::ollama::OllamaProvider::new(
+                config.ai.ollama.base_url.clone(),
+                config.ai.ollama.heavy_model.clone(),
+                config.ai.ollama.embedding_model.clone(),
+            ));
+            (ollama.clone(), ollama.clone(), heavy.clone())
+        }
     };
 
     // Initialize base components
@@ -173,8 +194,8 @@ async fn main() -> anyhow::Result<()> {
     let identity_resolver = Arc::new(brain_core::identity::CascadedIdentityResolver::new(
         knowledge_store.clone(),
         heavy_ai_provider.clone(),
-        vector_store.clone(),
-        embeddings.clone(),
+        Some(vector_store.clone()),
+        Some(embeddings.clone()),
     ));
 
     // OutputSink: отправляет результат обратно в Telegram пользователю
@@ -211,6 +232,7 @@ async fn main() -> anyhow::Result<()> {
     // Register native commands menu in Telegram UI
     let commands = vec![
         teloxide::types::BotCommand::new("start", "🚀 Главное меню"),
+        teloxide::types::BotCommand::new("base", "🗄️ Управление базами знаний"),
         teloxide::types::BotCommand::new("diary", "📖 Вечерний обзор дня"),
         teloxide::types::BotCommand::new("search", "🔍 Поиск по базе знаний"),
         teloxide::types::BotCommand::new("today", "📅 Заметка за сегодня"),
@@ -266,13 +288,15 @@ async fn main() -> anyhow::Result<()> {
     let engine_msg = engine.clone();
     let sm_msg = state_manager.clone();
     let ae_msg = analytics_engine.clone();
+    let vr_msg = vault_registry.clone();
     let message_handler = Update::filter_message().endpoint(
         move |bot: teloxide::Bot, msg: teloxide::types::Message| {
             let engine = engine_msg.clone();
             let sm = sm_msg.clone();
             let ae = ae_msg.clone();
+            let vr = vr_msg.clone();
             async move {
-                if let Err(e) = handlers::message::handle_message(bot, msg, engine, sm, ae).await {
+                if let Err(e) = handlers::message::handle_message(bot, msg, engine, sm, ae, vr).await {
                     tracing::error!("Message handler error: {}", e);
                 }
                 Ok::<(), std::convert::Infallible>(())
@@ -283,13 +307,15 @@ async fn main() -> anyhow::Result<()> {
     let engine_cb = engine.clone();
     let sm_cb = state_manager.clone();
     let ae_cb = analytics_engine.clone();
+    let vr_cb = vault_registry.clone();
     let callback_handler = Update::filter_callback_query().endpoint(
         move |bot: teloxide::Bot, query: teloxide::types::CallbackQuery| {
             let engine = engine_cb.clone();
             let sm = sm_cb.clone();
             let ae = ae_cb.clone();
+            let vr = vr_cb.clone();
             async move {
-                if let Err(e) = handlers::callback::handle_callback(bot, query, engine, sm, ae).await {
+                if let Err(e) = handlers::callback::handle_callback(bot, query, engine, sm, ae, vr).await {
                     tracing::error!("Callback handler error: {}", e);
                 }
                 Ok::<(), std::convert::Infallible>(())

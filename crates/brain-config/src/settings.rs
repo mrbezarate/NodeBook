@@ -163,9 +163,11 @@ pub struct AiConfig {
     pub ollama: OllamaConfig,
     #[serde(default)]
     pub openai: OpenAiConfig,
+    #[serde(default)]
+    pub gemini: GeminiConfig,
 }
 
-fn default_ai_provider() -> String { "ollama".into() }
+fn default_ai_provider() -> String { "gemini".into() }
 fn default_temperature() -> f32 { 0.3 }
 fn default_max_tokens() -> u32 { 512 }
 
@@ -177,6 +179,7 @@ impl Default for AiConfig {
             max_tokens: default_max_tokens(),
             ollama: OllamaConfig::default(),
             openai: OpenAiConfig::default(),
+            gemini: GeminiConfig::default(),
         }
     }
 }
@@ -225,6 +228,41 @@ pub struct OpenAiConfig {
 
 fn default_openai_model() -> String { "gpt-4o-mini".into() }
 fn default_openai_url() -> String { "https://api.openai.com/v1".into() }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeminiConfig {
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default = "default_gemini_model")]
+    pub model: String,
+    #[serde(default = "default_gemini_heavy_model")]
+    pub heavy_model: String,
+    #[serde(default = "default_gemini_lite_model")]
+    pub lite_model: String,
+    #[serde(default = "default_gemini_url")]
+    pub base_url: String,
+    #[serde(default = "default_gemini_embedding_model")]
+    pub embedding_model: String,
+}
+
+fn default_gemini_model() -> String { "gemini-2.5-flash".into() }
+fn default_gemini_heavy_model() -> String { "gemini-2.5-flash".into() }
+fn default_gemini_lite_model() -> String { "gemini-2.5-flash-lite".into() }
+fn default_gemini_url() -> String { "https://generativelanguage.googleapis.com/v1beta/openai".into() }
+fn default_gemini_embedding_model() -> String { "text-embedding-004".into() }
+
+impl Default for GeminiConfig {
+    fn default() -> Self {
+        Self {
+            api_key: String::new(),
+            model: default_gemini_model(),
+            heavy_model: default_gemini_heavy_model(),
+            lite_model: default_gemini_lite_model(),
+            base_url: default_gemini_url(),
+            embedding_model: default_gemini_embedding_model(),
+        }
+    }
+}
 
 // ── Embeddings ──────────────────────────────────────────────
 
