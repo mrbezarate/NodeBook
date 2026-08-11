@@ -1,0 +1,11 @@
+{
+  "active_vault_id": "base_1",
+  "vaults": [
+    {
+      "id": "base_1",
+      "name": "base_1",
+      "path": "./vault",
+      "created_at": "2026-08-11T19:16:11.878712585+00:00"
+    }
+  ]
+}

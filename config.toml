@@ -4,7 +4,7 @@ allowed_users = [5887915765]  # Жесткое ограничение: дост�
 
 # ── Vault (Obsidian) ─────────────────────────────────────────
 [vault]
-path = "/app/base"
+path = "./vault"
 daily_folder = "001 Daily"
 templates_folder = "Templates"
 
