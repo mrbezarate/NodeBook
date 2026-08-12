@@ -4,11 +4,14 @@ resolver = "2"
 members = [
     # ── Applications ──────────────────────────────────────
     "apps/telegram-bot",
+    "apps/media-downloader",
+    "apps/english-tutor",
 
     # ── Core Crates ───────────────────────────────────────
     "crates/brain-common",
     "crates/brain-config",
     "crates/brain-core",
+    "crates/brain-plugin",
 
     # ── Processing Pipeline ───────────────────────────────
     "crates/brain-parser",
@@ -90,3 +93,6 @@ brain-retrieval = { path = "crates/brain-retrieval" }
 brain-events = { path = "crates/brain-events" }
 brain-memory = { path = "crates/brain-memory" }
 brain-reasoner = { path = "crates/brain-reasoner" }
+brain-plugin = { path = "crates/brain-plugin" }
+brain-media-downloader = { path = "apps/media-downloader" }
+brain-english-tutor = { path = "apps/english-tutor" }

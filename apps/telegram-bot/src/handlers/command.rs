@@ -12,6 +12,7 @@ pub async fn handle_command(
     engine: &Arc<BrainEngine>,
     state_manager: &Arc<StateManager>,
     vault_registry: &Arc<tokio::sync::RwLock<brain_vault::VaultRegistry>>,
+    plugin_registry: &Arc<brain_plugin::PluginRegistry>,
 ) -> anyhow::Result<()> {
     let mut parts = text.split_whitespace();
     let cmd = parts.next().unwrap_or("");
@@ -173,7 +174,17 @@ pub async fn handle_command(
             }
         }
         _ => {
-            bot.send_message(chat_id, "❓ Команда не распознана. Воспользуйтесь меню или введите /help.").await?;
+            let plugin_cmd = brain_plugin::PluginCommand {
+                command: cmd.trim_start_matches('/').to_string(),
+                args: text.split_whitespace().skip(1).map(String::from).collect(),
+                user_id,
+                chat_id: chat_id.0,
+            };
+            if let Ok(Some(resp)) = plugin_registry.dispatch_command(&plugin_cmd).await {
+                crate::handlers::plugin_helper::send_plugin_response(bot, chat_id, resp).await?;
+            } else {
+                bot.send_message(chat_id, "❓ Команда не распознана. Воспользуйтесь меню или введите /help.").await?;
+            }
         }
     }
     Ok(())

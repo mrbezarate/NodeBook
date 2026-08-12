@@ -5,3 +5,4 @@ pub mod diary;
 pub mod analytics;
 pub mod visual;
 pub mod vault;
+pub mod plugin_helper;

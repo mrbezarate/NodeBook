@@ -227,7 +227,17 @@ async fn main() -> anyhow::Result<()> {
     engine.start_workers();
     let state_manager = Arc::new(StateManager::new());
 
-    tracing::info!("🧠 Brain bot initialized");
+    let plugin_registry = Arc::new(brain_plugin::PluginRegistry::new());
+    let media_plugin = Arc::new(brain_media_downloader::MediaDownloaderPlugin::new("./downloads"));
+    let english_plugin = Arc::new(brain_english_tutor::EnglishTutorPlugin::new_with_ai(heavy_ai_provider.clone()));
+    if let Err(e) = plugin_registry.register(media_plugin).await {
+        tracing::warn!("Failed to register media downloader plugin: {}", e);
+    }
+    if let Err(e) = plugin_registry.register(english_plugin).await {
+        tracing::warn!("Failed to register english tutor plugin: {}", e);
+    }
+
+    tracing::info!("🧠 Brain bot initialized with plugins");
     
     // Register native commands menu in Telegram UI
     let commands = vec![
@@ -237,6 +247,10 @@ async fn main() -> anyhow::Result<()> {
         teloxide::types::BotCommand::new("search", "🔍 Поиск по базе знаний"),
         teloxide::types::BotCommand::new("today", "📅 Заметка за сегодня"),
         teloxide::types::BotCommand::new("stats", "📊 Статистика знаний"),
+        teloxide::types::BotCommand::new("dl", "📥 Скачивание видео/аудио"),
+        teloxide::types::BotCommand::new("english", "🇬🇧 Английский язык (SRS)"),
+        teloxide::types::BotCommand::new("grammar", "📝 Проверка грамматики (Gemini)"),
+        teloxide::types::BotCommand::new("tutor", "🤖 AI Репетитор Английского"),
         teloxide::types::BotCommand::new("help", "ℹ️ Справка и возможности"),
     ];
     if let Err(e) = bot.set_my_commands(commands).await {
@@ -280,8 +294,6 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-
-    
     // Build handler tree with message + callback branches
     use teloxide::prelude::*;
     
@@ -289,14 +301,16 @@ async fn main() -> anyhow::Result<()> {
     let sm_msg = state_manager.clone();
     let ae_msg = analytics_engine.clone();
     let vr_msg = vault_registry.clone();
+    let pr_msg = plugin_registry.clone();
     let message_handler = Update::filter_message().endpoint(
         move |bot: teloxide::Bot, msg: teloxide::types::Message| {
             let engine = engine_msg.clone();
             let sm = sm_msg.clone();
             let ae = ae_msg.clone();
             let vr = vr_msg.clone();
+            let pr = pr_msg.clone();
             async move {
-                if let Err(e) = handlers::message::handle_message(bot, msg, engine, sm, ae, vr).await {
+                if let Err(e) = handlers::message::handle_message(bot, msg, engine, sm, ae, vr, pr).await {
                     tracing::error!("Message handler error: {}", e);
                 }
                 Ok::<(), std::convert::Infallible>(())
@@ -308,14 +322,16 @@ async fn main() -> anyhow::Result<()> {
     let sm_cb = state_manager.clone();
     let ae_cb = analytics_engine.clone();
     let vr_cb = vault_registry.clone();
+    let pr_cb = plugin_registry.clone();
     let callback_handler = Update::filter_callback_query().endpoint(
         move |bot: teloxide::Bot, query: teloxide::types::CallbackQuery| {
             let engine = engine_cb.clone();
             let sm = sm_cb.clone();
             let ae = ae_cb.clone();
             let vr = vr_cb.clone();
+            let pr = pr_cb.clone();
             async move {
-                if let Err(e) = handlers::callback::handle_callback(bot, query, engine, sm, ae, vr).await {
+                if let Err(e) = handlers::callback::handle_callback(bot, query, engine, sm, ae, vr, pr).await {
                     tracing::error!("Callback handler error: {}", e);
                 }
                 Ok::<(), std::convert::Infallible>(())

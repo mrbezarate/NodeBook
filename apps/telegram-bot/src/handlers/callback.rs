@@ -13,6 +13,7 @@ pub async fn handle_callback(
     state_manager: Arc<StateManager>,
     analytics_engine: Arc<brain_analytics::engine::LifeAnalyticsEngine>,
     vault_registry: Arc<tokio::sync::RwLock<brain_vault::VaultRegistry>>,
+    plugin_registry: Arc<brain_plugin::PluginRegistry>,
 ) -> anyhow::Result<()> {
     let user_id = query.from.id.0;
     let chat_id = query.message.as_ref().map(|m| m.chat().id);
@@ -106,7 +107,13 @@ pub async fn handle_callback(
             }
         }
         _ => {
-            tracing::warn!("Unknown callback prefix: {}", prefix);
+            if let Some(chat_id) = chat_id {
+                if let Ok(Some(resp)) = plugin_registry.dispatch_callback(data, user_id).await {
+                    crate::handlers::plugin_helper::send_plugin_response(&bot, chat_id, resp).await?;
+                } else {
+                    tracing::warn!("Unknown callback prefix: {}", prefix);
+                }
+            }
         }
     }
     

@@ -1,0 +1,17 @@
+[package]
+name = "brain-plugin"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+brain-common = { path = "../brain-common" }
+brain-config = { path = "../brain-config" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }

@@ -17,6 +17,9 @@ brain-memory = { path = "../../crates/brain-memory" }
 brain-reasoner = { path = "../../crates/brain-reasoner" }
 brain-analytics = { path = "../../crates/brain-analytics" }
 brain-graph = { path = "../../crates/brain-graph" }
+brain-plugin = { path = "../../crates/brain-plugin" }
+brain-media-downloader = { path = "../media-downloader" }
+brain-english-tutor = { path = "../english-tutor" }
 async-trait = "0.1"
 
 teloxide = { workspace = true }

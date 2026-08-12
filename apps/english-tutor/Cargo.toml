@@ -1,0 +1,21 @@
+[package]
+name = "brain-english-tutor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+brain-common = { path = "../../crates/brain-common" }
+brain-core = { path = "../../crates/brain-core" }
+brain-ai = { path = "../../crates/brain-ai" }
+brain-plugin = { path = "../../crates/brain-plugin" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+rand = "0.8"
+chrono = { workspace = true }
+uuid = { workspace = true }
