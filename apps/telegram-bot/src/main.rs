@@ -16,7 +16,22 @@ use crate::state::StateManager;
 
 // Old generators removed: AiTagGenerator, AiTitleGenerator, AiLinkSuggester are now inside AgenticPipeline
 
-/// Настройка планировщика
+fn get_timezone_offset_hours(tz_name: &str) -> i32 {
+    let tz_lower = tz_name.to_lowercase();
+    if tz_lower.contains("almaty") || tz_lower.contains("qyzylorda") || tz_lower.contains("astana") || tz_lower.contains("kazakhstan") || tz_lower.contains("+5") || tz_lower.contains("+05") {
+        5
+    } else if tz_lower.contains("tashkent") || tz_lower.contains("ekaterinburg") || tz_lower.contains("yerevan") || tz_lower.contains("baku") || tz_lower.contains("tbilisi") || tz_lower.contains("+4") || tz_lower.contains("+04") {
+        4
+    } else if tz_lower.contains("moscow") || tz_lower.contains("istanbul") || tz_lower.contains("minsk") || tz_lower.contains("+3") || tz_lower.contains("+03") {
+        3
+    } else if tz_lower.contains("london") || tz_lower.contains("utc") || tz_lower.contains("gmt") {
+        0
+    } else {
+        5
+    }
+}
+
+/// Настройка планировщика с учетом часового пояса
 async fn setup_scheduler(
     bot: teloxide::Bot,
     config: brain_config::BrainConfig,
@@ -29,13 +44,16 @@ async fn setup_scheduler(
 
     let review_time = config.diary.evening_review_time.clone();
     let parts: Vec<&str> = review_time.split(':').collect();
-    let hour = parts.get(0).unwrap_or(&"21");
+    let local_hour: i32 = parts.get(0).and_then(|h| h.parse().ok()).unwrap_or(22);
     let minute = parts.get(1).unwrap_or(&"00");
     
-    // Формат cron: sec min hour day month day_of_week
-    let cron_expr = format!("0 {} {} * * *", minute, hour);
+    let offset = get_timezone_offset_hours(&config.diary.timezone);
+    let utc_hour = (local_hour - offset).rem_euclid(24);
     
-    tracing::info!("📅 Setup scheduler: evening diary cron {}", cron_expr);
+    // Формат cron: sec min hour day month day_of_week
+    let cron_expr = format!("0 {} {} * * *", minute, utc_hour);
+    
+    tracing::info!("📅 Setup scheduler: evening diary local time {}:{} (TZ: {}, offset: +{}h) -> UTC cron {}", local_hour, minute, config.diary.timezone, offset, cron_expr);
     
     sched.add(Job::new_async(cron_expr.as_str(), move |_uuid, _l| {
         let bot = bot.clone();

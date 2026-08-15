@@ -4,7 +4,7 @@ use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::*;
 use tokio::sync::RwLock;
-use chrono::{NaiveDate, Datelike};
+use chrono::{NaiveDate, Datelike, Timelike};
 
 use brain_core::engine::BrainEngine;
 use brain_diary::evening_review::{EveningReview, ReviewState};
@@ -122,8 +122,16 @@ fn urlencoding(s: &str) -> String {
 
 fn format_day_info_message(info: &DayInfo, weather_today: &str, weather_tomorrow: &str) -> String {
     let date = info.date;
+    let local_hour = (chrono::Utc::now().hour() + 5) % 24;
+    let greeting = match local_hour {
+        5..=11 => "🌅 Доброе утро",
+        12..=17 => "☀️ Добрый день",
+        18..=22 => "🌙 Добрый вечер",
+        _ => "🌌 Доброй ночи",
+    };
+
     format!(
-        "🌙 Добрый вечер.\n\n\
+        "{}.\n\n\
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n\
         📅 Сегодня: {} {} {}, {}\n\
         🔢 Твой {}-й день жизни\n\
@@ -132,7 +140,8 @@ fn format_day_info_message(info: &DayInfo, weather_today: &str, weather_tomorrow
         🌤 Сейчас: {}\n\
         🌅 Завтра: {}\n\n\
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n\
-        Готов к вечернему обзору?",
+        Готов к обзору дня?",
+        greeting,
         date.day(), russian_month(date.month()), date.year(), russian_weekday(date),
         info.days_lived, info.days_remaining, info.life_percentage,
         weather_today, weather_tomorrow
