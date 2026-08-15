@@ -165,7 +165,12 @@ impl EmbeddingProvider for OpenAiProvider {
             .ok_or_else(|| BrainError::Ai("No embedding returned".into()))
     }
 
-    async fn embed_batch(&self, _texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        Err(BrainError::Ai("Batch embedding not implemented for OpenAiProvider yet".into()))
+    async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        let mut results = Vec::with_capacity(texts.len());
+        for text in texts {
+            let vec = self.embed(text).await?;
+            results.push(vec);
+        }
+        Ok(results)
     }
 }

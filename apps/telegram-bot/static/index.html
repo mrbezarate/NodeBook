@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>NodeBook OS</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Security Lockdown Screen for Unauthorized Users -->
+  <div id="access-denied-screen" class="security-screen" style="display: none;">
+    <div class="security-card">
+      <div class="security-icon-wrap">
+        <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="#ef4444" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+        </svg>
+      </div>
+      <h2 class="security-title">Доступ запрещён</h2>
+      <p class="security-desc">Это приватная база данных и личная медиасистема <b>NodeBook</b>. Доступ разрешён исключительно владельцу бота.</p>
+      <div id="security-user-info" class="security-user-badge">
+        <span>Проверка подлинности Telegram...</span>
+      </div>
+      <div class="security-hint">
+        🛡️ Защищено криптографической подписью Telegram HMAC-SHA256. Вход с чужих аккаунтов заблокирован.
+      </div>
+    </div>
+  </div>
+
+  <div id="app-container">
+    <!-- Top Header -->
+    <header class="app-header">
+      <div class="logo-area">
+        <div class="logo-mark">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/>
+            <path d="M12 6v6l4 2"/>
+          </svg>
+        </div>
+        <div class="logo-text">
+          <span class="brand-name">NodeBook</span>
+          <span class="brand-tag">OS</span>
+        </div>
+      </div>
+      
+      <!-- Top Segmented Navigation Tabs -->
+      <nav class="nav-tabs" role="tablist">
+        <button class="nav-tab active" data-tab="music" id="tab-btn-music">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 18V5l12-2v13"></path>
+            <circle cx="6" cy="18" r="3"></circle>
+            <circle cx="18" cy="16" r="3"></circle>
+          </svg>
+          <span>Музыка</span>
+        </button>
+        <button class="nav-tab" data-tab="media" id="tab-btn-media">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="23 7 16 12 23 17 23 7"></polygon>
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+          </svg>
+          <span>Медиа</span>
+        </button>
+        <button class="nav-tab" data-tab="pins" id="tab-btn-pins">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 17v5"></path>
+            <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"></path>
+          </svg>
+          <span>Pin</span>
+        </button>
+        <button class="nav-tab" data-tab="vault" id="tab-btn-vault">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+          </svg>
+          <span>База знаний</span>
+        </button>
+      </nav>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="app-main">
+      
+      <!-- ── 1. MUSIC TAB ─────────────────────────────────────────────────── -->
+      <section class="tab-pane active" id="pane-music">
+        <div class="section-header-compact">
+          <div class="search-box">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input type="text" id="music-search-input" placeholder="Поиск по названию или исполнителю...">
+          </div>
+        </div>
+
+        <div class="artist-filter-card" id="music-artist-card" style="display: none;">
+          <button class="creator-back-btn" id="btn-music-artist-back" title="Назад ко всем исполнителям">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="19" y1="12" x2="5" y2="12"></line>
+              <polyline points="12 19 5 12 12 5"></polyline>
+            </svg>
+            <span>Все исполнители</span>
+          </button>
+          <div class="artist-card-name" id="music-artist-name">Исполнитель</div>
+        </div>
+
+        <!-- Playlist Filter Chips -->
+        <div class="playlist-chips-bar" id="music-playlist-chips">
+          <!-- Dynamically populated chips -->
+        </div>
+
+        <!-- Music Track List -->
+        <div class="track-list" id="music-track-list">
+          <div class="empty-state">
+            <div class="empty-icon">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M9 18V5l12-2v13"></path>
+                <circle cx="6" cy="18" r="3"></circle>
+                <circle cx="18" cy="16" r="3"></circle>
+              </svg>
+            </div>
+            <p class="empty-title">Медиатека пуста</p>
+            <p class="empty-subtitle">Нажмите кнопку + в правом нижнем углу, чтобы скачать трек или плейлист</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 2. MEDIA HUB TAB ─────────────────────────────────────────────── -->
+      <section class="tab-pane" id="pane-media">
+        
+        <!-- Creator Profile View (YouTube / TikTok Style) -->
+        <div class="creator-profile-card" id="creator-profile-card" style="display: none;">
+          <div class="creator-profile-top">
+            <button class="creator-back-btn" id="btn-creator-back" title="Назад к общей медиатеке">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="19" y1="12" x2="5" y2="12"></line>
+                <polyline points="12 19 5 12 12 5"></polyline>
+              </svg>
+              <span>Все авторы</span>
+            </button>
+            <span class="creator-badge-pill">Канал</span>
+          </div>
+
+          <div class="creator-profile-info">
+            <div class="creator-avatar" id="creator-avatar">
+              <span id="creator-avatar-letter">A</span>
+            </div>
+            <div class="creator-meta">
+              <div class="creator-name-row">
+                <h2 class="creator-name" id="creator-name">@author</h2>
+                <svg class="verified-badge" viewBox="0 0 24 24" width="16" height="16" fill="#3b82f6">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                </svg>
+              </div>
+              <p class="creator-stats" id="creator-stats">0 видео сохранено</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-header-compact" id="media-search-header">
+          <div class="search-box">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input type="text" id="media-search-input" placeholder="Поиск по видео или автору...">
+          </div>
+        </div>
+
+        <!-- Media Playlist Chips -->
+        <div class="playlist-chips-bar" id="media-playlist-chips">
+          <!-- Dynamically populated chips -->
+        </div>
+
+        <!-- Video Grid -->
+        <div class="media-grid" id="media-grid">
+          <div class="empty-state">
+            <div class="empty-icon">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5">
+                <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+              </svg>
+            </div>
+            <p class="empty-title">Видео пока нет</p>
+            <p class="empty-subtitle">Нажмите + для загрузки видео по ссылке или с устройства</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 3. PINS TAB (Pinterest / Photo Gallery) ────────────────────────── -->
+      <section class="tab-pane" id="pane-pins">
+        <div class="section-header-compact">
+          <div class="search-box">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input type="text" id="pins-search-input" placeholder="Поиск по пинам и фото...">
+          </div>
+        </div>
+
+        <!-- Pins Masonry Grid -->
+        <div class="pins-grid" id="pins-grid">
+          <div class="empty-state">
+            <div class="empty-icon">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <polyline points="21 15 16 10 5 21"></polyline>
+              </svg>
+            </div>
+            <p class="empty-title">Пинов пока нет</p>
+            <p class="empty-subtitle">Отправьте боту ссылку на Pinterest или фото-пост, чтобы сохранить в Pin</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 4. KNOWLEDGE VAULT TAB ───────────────────────────────────────── -->
+      <section class="tab-pane" id="pane-vault">
+        <div class="search-box" style="margin-bottom: 12px;">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="text" id="vault-search-input" placeholder="Поиск по заметкам и папкам...">
+        </div>
+
+        <!-- Interactive Multi-Level Knowledge Tree Container -->
+        <div class="vault-tree-container" id="vault-tree-container">
+          <!-- Populated dynamically with interactive tree nodes -->
+        </div>
+      </section>
+
+    </main>
+
+    <!-- ── STICKY MINI AUDIO PLAYER BAR (BOTTOM) ────────────────────────── -->
+    <div class="mini-player" id="mini-player" style="display: none;">
+      <div class="mini-player-progress-track">
+        <div class="mini-player-progress-fill" id="mini-progress-fill"></div>
+      </div>
+      <div class="mini-player-content" id="mini-player-clickable">
+        <div class="mini-cover-wrap">
+          <img id="mini-cover-img" src="/api/player/cover/default" alt="Cover">
+        </div>
+        <div class="mini-info">
+          <div class="mini-title" id="mini-track-title">Трек</div>
+          <div class="mini-artist" id="mini-track-artist">Исполнитель</div>
+        </div>
+      </div>
+      <div class="mini-controls">
+        <button class="mini-btn" id="mini-btn-play" title="Play/Pause">
+          <svg id="mini-icon-play" viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+          <svg id="mini-icon-pause" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="display: none;">
+            <rect x="6" y="4" width="4" height="16"></rect>
+            <rect x="14" y="4" width="4" height="16"></rect>
+          </svg>
+        </button>
+        <button class="mini-btn" id="mini-btn-next" title="Next">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+            <polygon points="5 4 15 12 5 20 5 4"></polygon>
+            <line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="2.5"></line>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- ── FULLSCREEN AUDIO PLAYER OVERLAY ──────────────────────────────── -->
+    <div class="fullscreen-player" id="fullscreen-player">
+      <div class="fs-backdrop-glow" id="fs-backdrop-glow"></div>
+      
+      <div class="fs-header">
+        <button class="fs-icon-btn" id="fs-btn-close" title="Свернуть">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </button>
+        <div class="fs-context-title" id="fs-context-title">Медиатека</div>
+        <button class="fs-icon-btn" id="fs-btn-add-playlist" title="В плейлист">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+          </svg>
+        </button>
+      </div>
+
+      <div class="fs-body">
+        <div class="fs-cover-box">
+          <img id="fs-cover-img" src="/api/player/cover/default" alt="Cover">
+        </div>
+
+        <div class="fs-track-details">
+          <div class="fs-meta">
+            <div class="fs-title" id="fs-track-title">Название трека</div>
+            <div class="fs-artist" id="fs-track-artist">Исполнитель</div>
+          </div>
+          <button class="fs-heart-btn" id="fs-btn-heart" title="Избранное">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Scrubber -->
+        <div class="fs-scrubber-area">
+          <div class="fs-scrubber-bar" id="fs-scrubber-bar">
+            <div class="fs-scrubber-fill" id="fs-scrubber-fill"></div>
+            <div class="fs-scrubber-handle" id="fs-scrubber-handle"></div>
+          </div>
+          <div class="fs-time-row">
+            <span id="fs-time-current">0:00</span>
+            <span id="fs-time-total">0:00</span>
+          </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="fs-controls-row">
+          <button class="fs-ctrl-btn" id="fs-btn-shuffle" title="Случайный порядок">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="16 3 21 3 21 8"></polyline>
+              <line x1="4" y1="20" x2="21" y2="3"></line>
+              <polyline points="21 16 21 21 16 21"></polyline>
+              <line x1="15" y1="15" x2="21" y2="21"></line>
+              <line x1="4" y1="4" x2="9" y2="9"></line>
+            </svg>
+          </button>
+
+          <button class="fs-ctrl-btn" id="fs-btn-prev" title="Предыдущий трек">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+              <polygon points="19 20 9 12 19 4 19 20"></polygon>
+              <line x1="5" y1="19" x2="5" y2="5" stroke="currentColor" stroke-width="3"></line>
+            </svg>
+          </button>
+
+          <button class="fs-main-play-btn" id="fs-btn-play" title="Play/Pause">
+            <svg id="fs-icon-play" viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+            <svg id="fs-icon-pause" viewBox="0 0 24 24" width="28" height="28" fill="currentColor" style="display: none;">
+              <rect x="6" y="4" width="4" height="16"></rect>
+              <rect x="14" y="4" width="4" height="16"></rect>
+            </svg>
+          </button>
+
+          <button class="fs-ctrl-btn" id="fs-btn-next" title="Следующий трек">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+              <polygon points="5 4 15 12 5 20 5 4"></polygon>
+              <line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="3"></line>
+            </svg>
+          </button>
+
+          <button class="fs-ctrl-btn" id="fs-btn-repeat" title="Повтор">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="17 1 21 5 17 9"></polyline>
+              <path d="M3 11V9a4 4 0 0 1 4-4h14"></path>
+              <polyline points="7 23 3 19 7 15"></polyline>
+              <path d="M21 13v2a4 4 0 0 1-4 4H3"></path>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Volume Bar -->
+        <div class="fs-volume-row">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+          </svg>
+          <input type="range" id="fs-volume-slider" min="0" max="1" step="0.01" value="1" class="volume-slider">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── FLOATING ACTION BUTTON (FAB) ─────────────────────────────────── -->
+    <button class="fab-btn" id="fab-add-btn" title="Добавить контент">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+    </button>
+
+    <!-- ── ADD CONTENT MODAL (SHEET) WITH DOWNLOAD QUEUE ────────────────── -->
+    <div class="modal-overlay" id="add-content-modal" style="display: none;">
+      <div class="modal-sheet">
+        <div class="sheet-header">
+          <h3 class="sheet-title">Центр загрузки</h3>
+          <div class="sheet-header-actions">
+            <button class="sheet-icon-btn" id="btn-open-history-modal" title="История загрузок">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+                <polyline points="10 9 9 9 8 9"></polyline>
+              </svg>
+            </button>
+            <button class="sheet-close-btn" id="btn-close-add-modal" title="Закрыть">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="sheet-tabs">
+          <button class="sheet-tab active" data-action-tab="music-dl">Музыка / Плейлисты</button>
+          <button class="sheet-tab" data-action-tab="video-dl">Видео</button>
+          <button class="sheet-tab" data-action-tab="local-up">Загрузить файл</button>
+          <button class="sheet-tab" data-action-tab="new-pl">Плейлист</button>
+        </div>
+
+        <div class="sheet-content">
+          <!-- Action: Music Download -->
+          <div class="action-tab-pane active" id="action-music-dl">
+            <p class="action-desc">Вставьте ссылку на Spotify (трек, альбом, плейлист) или SoundCloud для сохранения аудио с обложкой.</p>
+            <div class="action-input-group">
+              <input type="text" id="add-music-url" class="action-input" placeholder="https://open.spotify.com/playlist/... или /track/...">
+              <button class="btn-action-primary" id="btn-submit-music-dl">Добавить в очередь загрузки</button>
+            </div>
+          </div>
+
+          <!-- Action: Video Download -->
+          <div class="action-tab-pane" id="action-video-dl">
+            <p class="action-desc">Вставьте ссылку на TikTok, YouTube Shorts, Reels в наилучшем качестве.</p>
+            <div class="action-input-group">
+              <input type="text" id="add-video-url" class="action-input" placeholder="https://www.tiktok.com/@user/video/...">
+              <button class="btn-action-primary" id="btn-submit-video-dl">Добавить в очередь загрузки</button>
+            </div>
+          </div>
+
+          <!-- Action: Local File Upload -->
+          <div class="action-tab-pane" id="action-local-up">
+            <div class="upload-dropzone" id="upload-dropzone">
+              <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+              </svg>
+              <p class="dropzone-text">Перетащите сюда MP4, MP3, WAV, MKV или выберите файл</p>
+              <input type="file" id="local-file-input" accept="audio/*,video/*" style="display: none;">
+              <button class="btn-action-secondary" id="btn-trigger-file-pick">Выбрать файл</button>
+            </div>
+          </div>
+
+          <!-- Action: Create Playlist -->
+          <div class="action-tab-pane" id="action-new-pl">
+            <p class="action-desc">Создайте новый плейлист для удобной организации музыки или видео.</p>
+            <div class="action-input-group">
+              <input type="text" id="new-playlist-name" class="action-input" placeholder="Название плейлиста (напр. Избранное)">
+              <div class="playlist-type-selector">
+                <label class="radio-label">
+                  <input type="radio" name="pl_type" value="audio" checked> Музыкальный
+                </label>
+                <label class="radio-label">
+                  <input type="radio" name="pl_type" value="video"> Видео
+                </label>
+              </div>
+              <button class="btn-action-primary" id="btn-submit-create-pl">Создать плейлист</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── DOWNLOAD QUEUE & PROGRESS SECTION (Visible only when tasks active) ── -->
+        <div class="download-queue-section" id="download-queue-section" style="display: none;">
+          <div class="queue-header">
+            <span class="queue-title">Активная очередь</span>
+            <span class="queue-badge" id="queue-count-badge">0 в процессе</span>
+          </div>
+          <div class="queue-list" id="queue-task-list">
+            <!-- Populated dynamically with active tasks -->
+          </div>
+        </div>
+
+        <div class="action-status-msg" id="action-status-msg"></div>
+      </div>
+    </div>
+
+    <!-- ── DOWNLOAD HISTORY MODAL (SEPARATE SHEET) ──────────────────────── -->
+    <div class="modal-overlay" id="download-history-modal" style="display: none;">
+      <div class="modal-sheet">
+        <div class="sheet-header">
+          <div class="history-title-area">
+            <h3 class="sheet-title">История загрузок</h3>
+            <span class="history-badge" id="history-count-badge">0 файлов</span>
+          </div>
+          <div class="sheet-header-actions">
+            <button class="btn-clear-history" id="btn-clear-history" title="Очистить историю">Очистить</button>
+            <button class="sheet-close-btn" id="btn-close-history-modal" title="Закрыть">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="history-list" id="history-task-list">
+          <!-- Populated dynamically from storage -->
+        </div>
+      </div>
+    </div>
+
+    <!-- ── IMMERSIVE CUSTOM VIDEO PLAYER MODAL ──────────────────────────── -->
+    <div class="modal-overlay" id="video-player-modal" style="display: none;">
+      <div class="video-modal-card">
+        
+        <!-- Header -->
+        <div class="video-modal-header">
+          <div class="video-modal-meta">
+            <h3 class="video-modal-title" id="vm-title">Видео</h3>
+            <button class="video-modal-author-btn" id="vm-author-btn" title="Перейти в профиль автора">
+              <span id="vm-author-name">@author</span>
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            </button>
+          </div>
+          
+          <div class="video-modal-actions">
+            <button class="vm-action-btn" id="vm-btn-heart" title="Добавить в любимые">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+              </svg>
+            </button>
+            <button class="vm-action-btn" id="vm-btn-add-pl" title="Добавить в плейлист">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+              </svg>
+            </button>
+            <button class="vm-action-btn delete-btn" id="vm-btn-delete" title="Удалить видео">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+            </button>
+            <button class="sheet-close-btn" id="btn-close-video-modal">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Custom Styled HTML5 Video Player Container -->
+        <div class="custom-video-wrapper" id="custom-video-wrapper">
+          <video id="html5-video-player" playsinline></video>
+          
+          <!-- Center Play/Pause Overlay Animation -->
+          <div class="video-center-overlay" id="video-center-overlay">
+            <button class="video-big-play-btn" id="video-big-play-btn">
+              <svg id="cv-icon-big-play" viewBox="0 0 24 24" width="36" height="36" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+              <svg id="cv-icon-big-pause" viewBox="0 0 24 24" width="36" height="36" fill="currentColor" style="display: none;">
+                <rect x="6" y="4" width="4" height="16"></rect>
+                <rect x="14" y="4" width="4" height="16"></rect>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Bottom Control Bar (Site Harmonious UI) -->
+          <div class="video-controls-bar" id="video-controls-bar">
+            <!-- Scrubber Track -->
+            <div class="video-scrubber-track" id="video-scrubber-track">
+              <div class="video-scrubber-fill" id="video-scrubber-fill"></div>
+              <div class="video-scrubber-handle" id="video-scrubber-handle"></div>
+            </div>
+
+            <div class="video-bar-bottom">
+              <div class="video-bar-left">
+                <button class="cv-ctrl-btn" id="cv-btn-play">
+                  <svg id="cv-icon-play" viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                  </svg>
+                  <svg id="cv-icon-pause" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="display: none;">
+                    <rect x="6" y="4" width="4" height="16"></rect>
+                    <rect x="14" y="4" width="4" height="16"></rect>
+                  </svg>
+                </button>
+                <div class="video-time-display">
+                  <span id="cv-time-current">0:00</span>
+                  <span class="divider">/</span>
+                  <span id="cv-time-total">0:00</span>
+                </div>
+              </div>
+
+              <div class="video-bar-right">
+                <button class="cv-ctrl-btn" id="cv-btn-pip" title="Картинка в картинке">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+                    <rect x="12" y="10" width="8" height="8" rx="1" fill="currentColor"></rect>
+                  </svg>
+                </button>
+                <button class="cv-ctrl-btn" id="cv-btn-fullscreen" title="На весь экран">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- More videos from this author / Next up carousel -->
+        <div class="video-more-section">
+          <div class="more-section-title" id="vm-more-title">Другие видео автора</div>
+          <div class="video-more-carousel" id="vm-more-carousel">
+            <!-- Carousel cards rendered dynamically -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── NOTE DOCUMENT READER MODAL ───────────────────────────────────── -->
+    <div class="modal-overlay" id="note-reader-modal" style="display: none;">
+      <div class="modal-sheet note-reader-sheet">
+        <div class="sheet-header">
+          <div class="reader-path-breadcrumbs" id="reader-breadcrumbs">
+            <span class="root-tag">🗂️ Vault</span> / <span id="reader-crumb-folder">📁 00_Daily</span> / <span class="active-file" id="reader-crumb-file">Note.md</span>
+          </div>
+          <div class="sheet-header-actions">
+            <button class="sheet-icon-btn" id="btn-reader-prop" title="Свойства и метаданные">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+              </svg>
+            </button>
+            <button class="sheet-close-btn" id="btn-close-reader-modal" title="Закрыть">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="reader-sheet-body">
+          <div class="reader-header-area">
+            <h2 class="reader-title" id="reader-title">Заголовок заметки</h2>
+            <div class="reader-meta-row" id="reader-meta-row">
+              <!-- Meta tags -->
+            </div>
+          </div>
+
+          <div class="reader-summary-card" id="reader-summary-card" style="display: none;">
+            <div class="summary-badge">⚡ ИИ Выжимка</div>
+            <div class="summary-text" id="reader-summary-text"></div>
+          </div>
+
+          <div class="reader-markdown-content" id="reader-content">
+            <!-- Formatted note text -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── NOTE PROPERTIES MODAL (VAULT) ────────────────────────────────── -->
+    <div class="modal-overlay" id="note-properties-modal" style="display: none;">
+      <div class="properties-modal-card">
+        <div class="sheet-header">
+          <h3 class="sheet-title">Свойства заметки</h3>
+          <button class="sheet-close-btn" id="btn-close-properties-modal">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        <div class="properties-content" id="properties-content">
+          <!-- Populated dynamically without note text -->
+        </div>
+      </div>
+    </div>
+
+    <!-- ── PIN PHOTO LIGHTBOX MODAL ──────────────────────────────────────── -->
+    <div class="modal-overlay" id="pin-modal" style="display: none;">
+      <div class="pin-modal-card">
+        <div class="sheet-header">
+          <h3 class="sheet-title" id="pin-modal-title">📌 Pin</h3>
+          <div class="sheet-header-actions">
+            <a id="btn-pin-download" class="sheet-icon-btn" download title="Скачать оригинал">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+            </a>
+            <button class="sheet-icon-btn del-btn" id="btn-pin-delete" title="Удалить пин">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+            </button>
+            <button class="sheet-close-btn" id="btn-close-pin-modal" title="Закрыть">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="pin-modal-body">
+          <img id="pin-modal-img" src="" alt="Pin image">
+        </div>
+      </div>
+    </div>
+
+    <!-- ── ADD TO PLAYLIST PICKER MODAL ─────────────────────────────────── -->
+    <div class="modal-overlay" id="playlist-picker-modal" style="display: none;">
+      <div class="properties-modal-card">
+        <div class="sheet-header">
+          <h3 class="sheet-title">Добавить в плейлист</h3>
+          <button class="sheet-close-btn" id="btn-close-picker-modal">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        <div class="picker-playlist-list" id="picker-playlist-list">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Hidden Audio Engine -->
+    <audio id="audio-engine" preload="auto"></audio>
+
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

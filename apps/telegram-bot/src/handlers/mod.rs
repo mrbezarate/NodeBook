@@ -6,3 +6,4 @@ pub mod analytics;
 pub mod visual;
 pub mod vault;
 pub mod plugin_helper;
+pub mod playlist_handler;

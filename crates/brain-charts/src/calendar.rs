@@ -8,6 +8,7 @@ pub fn draw_monthly_calendar(
     month: u32,
     activity_data: &HashMap<NaiveDate, u32>,
 ) -> Result<Vec<u8>, String> {
+    crate::init_fonts();
     let mut buffer = vec![0; 800 * 600 * 3];
     {
         let root = BitMapBackend::with_buffer(&mut buffer, (800, 600)).into_drawing_area();
@@ -20,12 +21,16 @@ pub fn draw_monthly_calendar(
             (30, 20),
         ).map_err(|e| e.to_string())?;
 
-        let start_date = NaiveDate::from_ymd_opt(year, month, 1).unwrap();
-        let days_in_month = if month == 12 {
-            NaiveDate::from_ymd_opt(year + 1, 1, 1).unwrap() - start_date
+        let start_date = NaiveDate::from_ymd_opt(year, month, 1)
+            .ok_or_else(|| format!("Invalid year/month: {}-{}", year, month))?;
+
+        let next_month_start = if month == 12 {
+            NaiveDate::from_ymd_opt(year + 1, 1, 1)
         } else {
-            NaiveDate::from_ymd_opt(year, month + 1, 1).unwrap() - start_date
-        }.num_days();
+            NaiveDate::from_ymd_opt(year, month + 1, 1)
+        }.ok_or_else(|| format!("Invalid next month date calculation for {}-{}", year, month))?;
+
+        let days_in_month = (next_month_start - start_date).num_days();
 
         let start_weekday = start_date.weekday().num_days_from_monday();
 
@@ -51,7 +56,8 @@ pub fn draw_monthly_calendar(
             let x = offset_x + col * cell_w;
             let y = offset_y + row * cell_h;
 
-            let date = NaiveDate::from_ymd_opt(year, month, day as u32).unwrap();
+            let date = NaiveDate::from_ymd_opt(year, month, day as u32)
+                .unwrap_or(start_date);
             let count = activity_data.get(&date).copied().unwrap_or(0);
 
             let bg_color = match count {
@@ -95,4 +101,31 @@ pub fn draw_monthly_calendar(
     }
 
     Ok(png_data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_draw_monthly_calendar_valid() {
+        let mut data = HashMap::new();
+        data.insert(NaiveDate::from_ymd_opt(2026, 8, 13).unwrap(), 5);
+        let res = draw_monthly_calendar(2026, 8, &data);
+        if let Err(ref e) = res {
+            panic!("draw_monthly_calendar failed with: {}", e);
+        }
+        assert!(res.is_ok());
+        let png = res.unwrap();
+        assert!(!png.is_empty());
+        // PNG header check
+        assert_eq!(&png[1..4], b"PNG");
+    }
+
+    #[test]
+    fn test_draw_monthly_calendar_invalid_month() {
+        let data = HashMap::new();
+        let res = draw_monthly_calendar(2026, 13, &data);
+        assert!(res.is_err());
+    }
 }

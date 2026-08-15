@@ -53,3 +53,22 @@ pub fn vault_menu_keyboard(registry: &brain_vault::VaultRegistry) -> InlineKeybo
 
     InlineKeyboardMarkup::new(rows)
 }
+
+/// Клавиатура с кнопкой запуска Telegram Web App.
+pub fn webapp_keyboard(url: &str) -> InlineKeyboardMarkup {
+    if let Ok(parsed_url) = reqwest::Url::parse(url) {
+        InlineKeyboardMarkup::new(vec![
+            vec![InlineKeyboardButton::web_app(
+                "🚀 Открыть NodeBook App",
+                teloxide::types::WebAppInfo { url: parsed_url },
+            )],
+        ])
+    } else {
+        InlineKeyboardMarkup::new(vec![
+            vec![InlineKeyboardButton::url(
+                "🌐 Открыть в браузере",
+                reqwest::Url::parse(url).unwrap_or_else(|_| reqwest::Url::parse("http://localhost:8080").unwrap()),
+            )],
+        ])
+    }
+}

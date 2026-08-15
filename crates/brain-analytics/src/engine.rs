@@ -29,6 +29,15 @@ impl LifeAnalyticsEngine {
 
         let recent_events: Vec<&Event> = all_events.iter().rev().take(events_limit).collect();
         let recent_metrics: Vec<&DiaryMetrics> = metrics.iter().rev().take(period_days).collect();
+
+        if recent_metrics.is_empty() && recent_events.is_empty() {
+            return Ok(
+                "📊 <b>Недостаточно данных для глубокого анализа</b>\n\n\
+                В вашей базе пока нет сохранённых записей дневника или заметок за выбранный период.\n\n\
+                💡 <i>Совет: Заполните вечерний обзор (/diary) или отправьте свои мысли и заметки в бот, чтобы AI смог выявить персональные инсайты о сне, настроении и продуктивности!</i>"
+                .to_string()
+            );
+        }
         
         let mut prompt_data = String::new();
         prompt_data.push_str(&format!("--- DIARY METRICS (LAST {} DAYS) ---\n", period_days));
@@ -45,22 +54,46 @@ impl LifeAnalyticsEngine {
         }
         
         let period_str = match period_days {
-            7 => "week",
-            30 => "month",
-            365 => "year",
-            _ => "entire history",
+            7 => "последние 7 дней",
+            30 => "последние 30 дней",
+            365 => "этот год",
+            _ => "всё время",
         };
 
         let prompt = format!(
-            "You are a Life Analytics AI. Analyze the user's Diary Metrics (mood, stress, sleep, etc.) \
-            and their Knowledge Events (what they learned, searched, or wrote about) for the last {}.\n\
-            Find 2-3 deep, meaningful correlations between their knowledge work and their mood/sleep/stress. \
-            Format the response as a short, inspiring message with bullet points. Speak in Russian directly to the user.\n\n{}",
+            "Ты — аналитик личной эффективности и ментального здоровья. Проанализируй дневниковые метрики пользователя \
+            (настроение, стресс, сон, продуктивность) и события базы знаний за {}.\n\
+            Сформулируй 2-3 четких, лаконичных и вдохновляющих вывода (инсайта) с практическими советами.\n\
+            Пиши на русском языке с пунктами и эмодзи. Не лей воду, давай только конкретику.\n\n{}",
             period_str, prompt_data
         );
         
-        let insight = self.ai_provider.complete(&prompt).await?;
-        
-        Ok(insight)
+        match self.ai_provider.complete(&prompt).await {
+            Ok(insight) => Ok(insight),
+            Err(e) => {
+                tracing::warn!("AI insight completion failed: {}", e);
+                // Fallback rule-based stats
+                let avg_mood: f32 = if !recent_metrics.is_empty() {
+                    let sum: f32 = recent_metrics.iter().map(|m| m.mood.unwrap_or(7) as f32).sum();
+                    sum / recent_metrics.len() as f32
+                } else {
+                    7.0
+                };
+                let avg_sleep: f32 = if !recent_metrics.is_empty() {
+                    let sum: f32 = recent_metrics.iter().map(|m| m.sleep_hours.unwrap_or(7.5) as f32).sum();
+                    sum / recent_metrics.len() as f32
+                } else {
+                    7.5
+                };
+                Ok(format!(
+                    "📈 <b>Базовые инсайты за {}:</b>\n\n\
+                    • Средний уровень настроения: <b>{:.1}/10</b>\n\
+                    • Средняя продолжительность сна: <b>{:.1} ч</b>\n\
+                    • Зафиксировано заметок и событий: <b>{}</b>\n\n\
+                    💡 <i>(Для генерации глубоких нейросетевых инсайтов убедитесь в доступности AI-провайдера)</i>",
+                    period_str, avg_mood, avg_sleep, recent_events.len()
+                ))
+            }
+        }
     }
 }

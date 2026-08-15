@@ -14,6 +14,7 @@ pub async fn handle_message(
     _analytics_engine: Arc<brain_analytics::engine::LifeAnalyticsEngine>,
     vault_registry: Arc<tokio::sync::RwLock<brain_vault::VaultRegistry>>,
     plugin_registry: Arc<brain_plugin::PluginRegistry>,
+    tunnel_manager: Arc<crate::tunnel::TunnelManager>,
 ) -> anyhow::Result<()> {
     let text = match msg.text() {
         Some(t) => t,
@@ -36,7 +37,7 @@ pub async fn handle_message(
     // Check if text corresponds to main menu buttons
     match text {
         "📖 Дневник дня" => {
-            crate::handlers::command::handle_command(&bot, &msg, "/diary", &engine, &state_manager, &vault_registry, &plugin_registry).await?;
+            crate::handlers::command::handle_command(&bot, &msg, "/diary", &engine, &state_manager, &vault_registry, &plugin_registry, &tunnel_manager).await?;
             return Ok(());
         }
         "📊 Аналитика" | "/analytics" => {
@@ -44,11 +45,11 @@ pub async fn handle_message(
             return Ok(());
         }
         "🔍 Поиск" => {
-            crate::handlers::command::handle_command(&bot, &msg, "/search", &engine, &state_manager, &vault_registry, &plugin_registry).await?;
+            crate::handlers::command::handle_command(&bot, &msg, "/search", &engine, &state_manager, &vault_registry, &plugin_registry, &tunnel_manager).await?;
             return Ok(());
         }
         "📅 Запись за сегодня" => {
-            crate::handlers::command::handle_command(&bot, &msg, "/today", &engine, &state_manager, &vault_registry, &plugin_registry).await?;
+            crate::handlers::command::handle_command(&bot, &msg, "/today", &engine, &state_manager, &vault_registry, &plugin_registry, &tunnel_manager).await?;
             return Ok(());
         }
         "🗄️ База знаний" => {
@@ -60,7 +61,7 @@ pub async fn handle_message(
             return Ok(());
         }
         "ℹ️ Справка" => {
-            crate::handlers::command::handle_command(&bot, &msg, "/help", &engine, &state_manager, &vault_registry, &plugin_registry).await?;
+            crate::handlers::command::handle_command(&bot, &msg, "/help", &engine, &state_manager, &vault_registry, &plugin_registry, &tunnel_manager).await?;
             return Ok(());
         }
         _ => {}
@@ -68,8 +69,43 @@ pub async fn handle_message(
 
     // Check if it's a command starting with /
     if text.starts_with('/') {
-        crate::handlers::command::handle_command(&bot, &msg, text, &engine, &state_manager, &vault_registry, &plugin_registry).await?;
+        crate::handlers::command::handle_command(&bot, &msg, text, &engine, &state_manager, &vault_registry, &plugin_registry, &tunnel_manager).await?;
         return Ok(());
+    }
+
+    // 🔗 AUTO-DETECT MEDIA URL: If the user sends any URL directly, dispatch to downloader immediately
+    let detected_urls = brain_media_downloader::MediaDownloader::detect_all_urls(text);
+    if !detected_urls.is_empty() {
+        state_manager.reset(user_id).await;
+
+        let has_playlist = detected_urls.iter().any(|(u, _, mt)| {
+            *mt == fsocial_common::models::MediaType::Playlist
+                || u.contains("/playlist/")
+                || u.contains("/album/")
+                || u.contains("list=")
+        });
+
+        if has_playlist {
+            let bot_clone = bot.clone();
+            let text_clone = text.to_string();
+            tokio::spawn(async move {
+                let dl = brain_media_downloader::MediaDownloader::new("./downloads");
+                crate::handlers::playlist_handler::handle_playlist_stream(&bot_clone, chat_id, &text_clone, &dl).await;
+            });
+            return Ok(());
+        }
+
+        let plugin_msg = brain_plugin::PluginMessage {
+            message_id: msg.id.0.to_string(),
+            user_id,
+            chat_id: chat_id.0,
+            text: text.to_string(),
+            created_at: chrono::Utc::now(),
+        };
+        if let Ok(Some(resp)) = plugin_registry.dispatch_message(&plugin_msg).await {
+            crate::handlers::plugin_helper::send_plugin_response(&bot, chat_id, resp).await?;
+            return Ok(());
+        }
     }
     
     // Check user state — route accordingly

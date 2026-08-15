@@ -73,7 +73,6 @@ pub fn auto_link(text: &str, docs: &[LinkCandidate]) -> String {
     result
 }
 
-/// Helper to find an exact substring that is NOT inside a code block, existing link, or URL
 fn find_safe_match(text: &str, alias: &str) -> Option<(usize, usize)> {
     let lower_text = text.to_lowercase();
     let lower_alias = alias.to_lowercase();
@@ -81,17 +80,30 @@ fn find_safe_match(text: &str, alias: &str) -> Option<(usize, usize)> {
     let mut start_idx = 0;
     while let Some(idx) = lower_text[start_idx..].find(&lower_alias) {
         let abs_idx = start_idx + idx;
-        let end_idx = abs_idx + alias.len();
+        let end_idx = abs_idx + lower_alias.len();
 
         if is_safe_context(text, abs_idx) {
-            let is_start_boundary = abs_idx == 0 || !is_alphanumeric_or_cyrillic(text, abs_idx - 1);
-            let is_end_boundary = end_idx == text.len() || !is_alphanumeric_or_cyrillic(text, end_idx);
+            let is_start_boundary = text.get(..abs_idx)
+                .and_then(|s| s.chars().next_back())
+                .map(|c| !c.is_alphanumeric())
+                .unwrap_or(true);
+
+            let is_end_boundary = text.get(end_idx..)
+                .and_then(|s| s.chars().next())
+                .map(|c| !c.is_alphanumeric())
+                .unwrap_or(true);
             
             if is_start_boundary && is_end_boundary {
                 return Some((abs_idx, end_idx));
             }
         }
-        start_idx = abs_idx + 1;
+
+        // Advance start_idx to the next char boundary safely
+        if let Some((next_char_offset, _)) = lower_text[abs_idx..].char_indices().nth(1) {
+            start_idx = abs_idx + next_char_offset;
+        } else {
+            break;
+        }
     }
     None
 }
@@ -144,11 +156,6 @@ fn find_safe_fuzzy_match(text: &str, alias: &str) -> Option<(usize, usize)> {
     }
 
     None
-}
-
-fn is_alphanumeric_or_cyrillic(text: &str, byte_idx: usize) -> bool {
-    if byte_idx >= text.len() { return false; }
-    text[byte_idx..].chars().next().map(|c| c.is_alphanumeric()).unwrap_or(false)
 }
 
 fn is_safe_context(text: &str, idx: usize) -> bool {
@@ -240,5 +247,28 @@ mod tests {
         let text = "я вчера смотрел кавбой бибоп";
         let res = auto_link(text, &docs);
         assert_eq!(res, "я вчера смотрел [[впичетление об аниме кавбой бибоп|кавбой бибоп]]");
+    }
+
+    #[test]
+    fn test_cyrillic_boundary_and_utf8_safety() {
+        let docs = vec![
+            LinkCandidate {
+                id: "rust-1".into(),
+                title: "Язык Rust".into(),
+                aliases: vec!["раст".into(), "rust".into()],
+                score: 0.95,
+            },
+            LinkCandidate {
+                id: "ai-1".into(),
+                title: "Искусственный интеллект".into(),
+                aliases: vec!["ИИ".into()],
+                score: 0.9,
+            },
+        ];
+
+        // Ensure non-boundary matches like "растение" are not linked
+        let text = "растение растет, но раст это язык программирования и ИИ в деле.";
+        let res = auto_link(text, &docs);
+        assert_eq!(res, "растение растет, но [[Язык Rust|раст]] это язык программирования и [[Искусственный интеллект|ИИ]] в деле.");
     }
 }

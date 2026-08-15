@@ -219,7 +219,11 @@ pub async fn handle_analytics_callback(
                         .await?;
                 }
                 Err(e) => {
-                    bot.edit_message_text(chat_id, message_id, format!("❌ Ошибка AI: {}", e)).await?;
+                    tracing::error!("Life insights error: {}", e);
+                    bot.edit_message_text(chat_id, message_id, "⚠️ <i>Не удалось сформировать AI-инсайты прямо сейчас. Пожалуйста, попробуйте чуть позже или добавьте больше записей в дневник.</i>")
+                        .parse_mode(teloxide::types::ParseMode::Html)
+                        .reply_markup(analytics_ai_keyboard())
+                        .await?;
                 }
             }
         }

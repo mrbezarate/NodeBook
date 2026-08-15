@@ -48,14 +48,17 @@ impl Plugin for EnglishTutorPlugin {
     }
 
     async fn handle_command(&self, cmd: &PluginCommand) -> Result<PluginResponse> {
-        match cmd.command.as_str() {
+        let clean_cmd = cmd.command.split('@').next().unwrap_or(&cmd.command);
+        match clean_cmd {
             "english" | "eng" | "vocab" | "quiz" => {
-                if cmd.command == "quiz" || cmd.args.first().map_or(false, |a| a == "quiz") {
+                if clean_cmd == "quiz" || cmd.args.first().map_or(false, |a| a == "quiz") {
                     let (card, options) = self.engine.generate_quiz();
 
                     let text = format!(
-                        "🇬🇧 *English Quiz*\n\nWord: *{}* {}\nLevel: `{}`\n\nChoose the correct translation:",
-                        card.word, card.phonetic, card.level
+                        "🇬🇧 <b>English Quiz</b>\n\nWord: <b>{}</b> <i>{}</i>\nLevel: <code>{}</code>\n\nChoose the correct translation:",
+                        escape_html(&card.word),
+                        escape_html(&card.phonetic),
+                        escape_html(&card.level)
                     );
 
                     let mut kb_options = Vec::new();
@@ -77,8 +80,13 @@ impl Plugin for EnglishTutorPlugin {
 
                 let card = self.engine.get_random_card().unwrap();
                 let text = format!(
-                    "🇬🇧 *English Flashcard*\n\n📖 *Word:* {} {}\n📊 *Level:* `{}`\n\n🇷🇺 *Translation:* {}\n\n💬 *Example:* {}\n_{}_",
-                    card.word, card.phonetic, card.level, card.translation_ru, card.example_en, card.example_ru
+                    "🇬🇧 <b>English Flashcard</b>\n\n📖 <b>Word:</b> {} <i>{}</i>\n📊 <b>Level:</b> <code>{}</code>\n\n🇷🇺 <b>Translation:</b> {}\n\n💬 <b>Example:</b> {}\n<i>{}</i>",
+                    escape_html(&card.word),
+                    escape_html(&card.phonetic),
+                    escape_html(&card.level),
+                    escape_html(&card.translation_ru),
+                    escape_html(&card.example_en),
+                    escape_html(&card.example_ru)
                 );
 
                 let options = vec![
@@ -93,7 +101,7 @@ impl Plugin for EnglishTutorPlugin {
                 let input = cmd.args.join(" ");
                 if input.is_empty() {
                     return Ok(PluginResponse::Text(
-                        "📝 *Gemini Grammar Analyzer*\n\nUsage: `/grammar <your English sentence>`\nExample: `/grammar I has been working on this project`".to_string(),
+                        "📝 <b>Gemini Grammar Analyzer</b>\n\n<b>Usage:</b> <code>/grammar &lt;your English sentence&gt;</code>\n<b>Example:</b> <code>/grammar I has been working on this project</code>".to_string(),
                     ));
                 }
 
@@ -104,7 +112,7 @@ impl Plugin for EnglishTutorPlugin {
                 let input = cmd.args.join(" ");
                 if input.is_empty() {
                     return Ok(PluginResponse::Text(
-                        "🇬🇧 *Gemini AI English Tutor*\n\nUsage: `/tutor <your message in English>`\nExample: `/tutor Hi! I want to practice speaking about tech and software development.`".to_string(),
+                        "🇬🇧 <b>Gemini AI English Tutor</b>\n\n<b>Usage:</b> <code>/tutor &lt;your message in English&gt;</code>\n<b>Example:</b> <code>/tutor Hi! I want to practice speaking about tech and software development.</code>".to_string(),
                     ));
                 }
 
@@ -186,4 +194,11 @@ impl Plugin for EnglishTutorPlugin {
     async fn status(&self) -> PluginStatus {
         PluginStatus::Active
     }
+}
+
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+     .replace('<', "&lt;")
+     .replace('>', "&gt;")
+     .replace('"', "&quot;")
 }

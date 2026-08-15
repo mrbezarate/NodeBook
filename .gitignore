@@ -3,9 +3,10 @@
 **/*.rs.bk
 Cargo.lock
 
-# Environment
+# Environment and Config
 .env
 *.env.local
+config.toml
 
 # IDE
 .idea/
@@ -33,3 +34,10 @@ vault/
 base/
 
 ollama_data/
+
+# Binaries and Downloads
+bin/
+downloads/
+apps/media-downloader/downloads/
+**/downloads/*
+!**/downloads/.gitkeep

@@ -62,6 +62,12 @@ pub enum PluginResponse {
     Handled,
     Ignored,
     Error(String),
+    MediaGroup {
+        title: String,
+        file_paths: Vec<String>,
+        caption: Option<String>,
+    },
+    Batch(Vec<PluginResponse>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

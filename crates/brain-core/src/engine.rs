@@ -175,6 +175,7 @@ impl BrainEngine {
             if let Some(ref store) = self.raw_event_store {
                 match store.next_unprocessed_event("LlmProcessRequested").await {
                     Ok(Some(record)) => {
+                        let _ = store.mark_event_processed(&record.id).await;
                         if let brain_common::SourcingEvent::LlmProcessRequested { text, source } = record.event {
                             let request_id = uuid::Uuid::new_v4().to_string();
                             tracing::info!(request_id = %request_id, aggregate_id = %record.aggregate_id, "start LLM request");
@@ -215,6 +216,8 @@ impl BrainEngine {
                                         summary: final_summary, 
                                         tags: entry.classification.tags,
                                         enriched_text: Some(final_enriched),
+                                        area: Some(entry.classification.area.to_string()),
+                                        para: Some(entry.classification.para_category.to_string()),
                                     };
                                     let rec = brain_common::SourcingEventRecord {
                                         id: uuid::Uuid::new_v4().to_string(),
@@ -253,6 +256,7 @@ impl BrainEngine {
             if let Some(ref store) = self.raw_event_store {
                 match store.next_unprocessed_event("EmbeddingProcessRequested").await {
                     Ok(Some(record)) => {
+                        let _ = store.mark_event_processed(&record.id).await;
                         if let brain_common::SourcingEvent::EmbeddingProcessRequested { text } = record.event {
                             if let Some(ref embeddings) = self.embeddings {
                                 if let Ok(vector) = embeddings.embed(&text).await {
@@ -280,10 +284,15 @@ impl BrainEngine {
         loop {
             if let Some(ref store) = self.raw_event_store {
                 // Here we can fetch FallbackTriggered or LlmProcessed
-                // For simplicity, let's poll LlmProcessed and FallbackTriggered. We can do it by querying specific event types.
                 let mut processed_id = None;
-                if let Ok(Some(rec)) = store.next_unprocessed_event("LlmProcessed").await { processed_id = Some(rec.aggregate_id); }
-                else if let Ok(Some(rec)) = store.next_unprocessed_event("FallbackTriggered").await { processed_id = Some(rec.aggregate_id); }
+                if let Ok(Some(rec)) = store.next_unprocessed_event("LlmProcessed").await { 
+                    let _ = store.mark_event_processed(&rec.id).await;
+                    processed_id = Some(rec.aggregate_id); 
+                }
+                else if let Ok(Some(rec)) = store.next_unprocessed_event("FallbackTriggered").await { 
+                    let _ = store.mark_event_processed(&rec.id).await;
+                    processed_id = Some(rec.aggregate_id); 
+                }
                 
                 if let Some(agg_id) = processed_id {
                     if let Ok(Some(entry)) = self.rebuild(&agg_id).await {
@@ -321,7 +330,7 @@ impl BrainEngine {
                             brain_common::SourcingEvent::MessageIngested { text, .. } => {
                                 entry.raw = text;
                             }
-                            brain_common::SourcingEvent::LlmProcessed { title, summary, tags, enriched_text: _ } => {
+                            brain_common::SourcingEvent::LlmProcessed { title, summary, tags, enriched_text: _, area: _, para: _ } => {
                                 if let Some(t) = title {
                                     entry.title = t;
                                 }
@@ -383,13 +392,32 @@ impl BrainEngine {
                         entry.raw_text = text;
                         entry.source = source;
                     }
-                    brain_common::SourcingEvent::LlmProcessed { title, summary, tags, enriched_text } => {
+                    brain_common::SourcingEvent::LlmProcessed { title, summary, tags, enriched_text, area, para } => {
                         if let Some(t) = title {
                             entry.classification.suggested_title = t;
                         }
                         entry.classification.summary = summary;
                         entry.classification.tags = tags;
                         entry.classification.enriched_text = enriched_text;
+                        if let Some(a) = area {
+                            entry.classification.area = match a.as_str() {
+                                "GameDev" => brain_common::Area::GameDev,
+                                "Career" => brain_common::Area::Career,
+                                "Programming" => brain_common::Area::Programming,
+                                "Finance" => brain_common::Area::Finance,
+                                "Psychology" => brain_common::Area::Psychology,
+                                _ => brain_common::Area::Life,
+                            };
+                        }
+                        if let Some(p) = para {
+                            entry.classification.para_category = match p.as_str() {
+                                "Projects" | "Project" => brain_common::ParaCategory::Projects,
+                                "Areas" | "Area" => brain_common::ParaCategory::Areas,
+                                "Resources" | "Resource" => brain_common::ParaCategory::Resources,
+                                "Archives" | "Archive" => brain_common::ParaCategory::Archive,
+                                _ => brain_common::ParaCategory::Inbox,
+                            };
+                        }
                     }
                     brain_common::SourcingEvent::FallbackTriggered { .. } => {
                         is_fallback = true;

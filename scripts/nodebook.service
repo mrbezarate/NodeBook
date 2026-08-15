@@ -1,0 +1,15 @@
+[Unit]
+Description=NodeBook Personal Knowledge OS & Telegram Mini App
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/mrbezarate/NodeBook
+ExecStartPre=/bin/rm -f /home/mrbezarate/NodeBook/vault/.tantivy-indexer.lock /home/mrbezarate/NodeBook/.tantivy-indexer.lock /home/mrbezarate/NodeBook/index/.tantivy-indexer.lock
+ExecStart=/home/mrbezarate/NodeBook/target/release/brain-telegram-bot
+Restart=always
+RestartSec=5s
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=default.target

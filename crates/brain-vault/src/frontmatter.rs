@@ -12,6 +12,8 @@ pub struct Frontmatter {
     pub modified: String,
     pub id: String,
     #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
     pub links: Vec<brain_common::SemanticLink>,
     #[serde(default)]
     pub source: String,

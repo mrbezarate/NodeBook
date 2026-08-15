@@ -20,6 +20,7 @@ brain-graph = { path = "../../crates/brain-graph" }
 brain-plugin = { path = "../../crates/brain-plugin" }
 brain-media-downloader = { path = "../media-downloader" }
 brain-english-tutor = { path = "../english-tutor" }
+fsocial-common = { path = "../../FSocial_media_downloader/common" }
 async-trait = "0.1"
 
 teloxide = { workspace = true }
@@ -30,7 +31,12 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 dotenvy = { workspace = true }
 reqwest = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
+uuid = { workspace = true }
+regex = { workspace = true }
 brain-charts = { version = "0.1.0", path = "../../crates/brain-charts" }
 tokio-cron-scheduler = "0.15.1"
-axum = "0.8.9"
+axum = { version = "0.8.9", features = ["multipart"] }
+ring = "0.17"
+urlencoding = "2.1"

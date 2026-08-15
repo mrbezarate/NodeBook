@@ -106,6 +106,21 @@ pub async fn handle_callback(
                 bot.send_message(chat_id, "📝 Отправьте текст для дополнения этой записи (он будет добавлен в конец файла):").await?;
             }
         }
+        "mldl" => {
+            if let (Some(chat_id), Some(message_id)) = (chat_id, message_id) {
+                // Update message to indicate loading and remove buttons (preventing double clicks)
+                let _ = bot
+                    .edit_message_text(chat_id, message_id, "⏳ <i>Загрузка медиа...</i>")
+                    .parse_mode(teloxide::types::ParseMode::Html)
+                    .await;
+
+                if let Ok(Some(resp)) = plugin_registry.dispatch_callback(data, user_id).await {
+                    // Delete prompt/loading message so chat is not cluttered
+                    let _ = bot.delete_message(chat_id, message_id).await;
+                    crate::handlers::plugin_helper::send_plugin_response(&bot, chat_id, resp).await?;
+                }
+            }
+        }
         _ => {
             if let Some(chat_id) = chat_id {
                 if let Ok(Some(resp)) = plugin_registry.dispatch_callback(data, user_id).await {

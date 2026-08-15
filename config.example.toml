@@ -1,0 +1,54 @@
+# ── Telegram ─────────────────────────────────────────────────
+[telegram]
+bot_token = "YOUR_TELEGRAM_BOT_TOKEN"
+allowed_users = [5887915765]  # Жесткое ограничение: доступ ТОЛЬКО для владельца (ID: 5887915765)
+
+# ── Vault (Obsidian) ─────────────────────────────────────────
+[vault]
+path = "./vault"
+daily_folder = "001 Daily"
+templates_folder = "Templates"
+
+[vault.para]
+projects = "001 Project"
+areas = "002 Areas"
+resources = "003 Resources"
+archive = "004 Archives"
+inbox = "000 Inbox"
+
+# ── Дневник ──────────────────────────────────────────────────
+[diary]
+evening_review_time = "22:00"
+timezone = "Asia/Almaty"
+city = "Taldykorgan"           # ← Талдыкорган для погоды (wttr.in)
+life_expectancy_years = 80
+birth_date = "2009-01-24"         # ← Дата рождения (24 января 2009)
+
+# ── AI ───────────────────────────────────────────────────────
+[ai]
+provider = "gemini"
+temperature = 0.3
+max_tokens = 512
+
+[ai.gemini]
+api_key = "YOUR_GEMINI_API_KEY"
+model = "gemini-2.5-flash"
+heavy_model = "gemini-2.5-flash"
+lite_model = "gemini-2.5-flash-lite"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+embedding_model = "text-embedding-004"
+
+[ai.ollama]
+base_url = "http://ollama:11434"
+model = "gpt-oss:20b-cloud"
+heavy_model = "gpt-oss:120b-cloud"
+embedding_model = "nomic-embed-text"
+
+# ── Планировщик ──────────────────────────────────────────────
+[scheduler]
+check_interval_seconds = 60
+max_reminders_per_day = 20
+
+# ── Логирование ──────────────────────────────────────────────
+[logging]
+level = "info"

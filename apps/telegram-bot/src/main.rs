@@ -6,6 +6,8 @@ mod handlers;
 mod keyboard;
 mod output_sink;
 mod state;
+mod tunnel;
+mod web_server;
 
 use brain_core::traits::*;
 use brain_core::engine::BrainEngineBuilder;
@@ -242,42 +244,38 @@ async fn main() -> anyhow::Result<()> {
     // Register native commands menu in Telegram UI
     let commands = vec![
         teloxide::types::BotCommand::new("start", "🚀 Главное меню"),
-        teloxide::types::BotCommand::new("base", "🗄️ Управление базами знаний"),
+        teloxide::types::BotCommand::new("app", "📱 Web Mini App (Музыка, Видео, Заметки)"),
+        teloxide::types::BotCommand::new("dl", "📥 Скачивание видео (YouTube/Reels/TikTok)"),
+        teloxide::types::BotCommand::new("mp3", "🎵 Скачивание аудио MP3"),
         teloxide::types::BotCommand::new("diary", "📖 Вечерний обзор дня"),
         teloxide::types::BotCommand::new("search", "🔍 Поиск по базе знаний"),
         teloxide::types::BotCommand::new("today", "📅 Заметка за сегодня"),
         teloxide::types::BotCommand::new("stats", "📊 Статистика знаний"),
-        teloxide::types::BotCommand::new("dl", "📥 Скачивание видео/аудио"),
-        teloxide::types::BotCommand::new("english", "🇬🇧 Английский язык (SRS)"),
-        teloxide::types::BotCommand::new("grammar", "📝 Проверка грамматики (Gemini)"),
-        teloxide::types::BotCommand::new("tutor", "🤖 AI Репетитор Английского"),
+        teloxide::types::BotCommand::new("analytics", "📈 Детальная аналитика"),
+        teloxide::types::BotCommand::new("viz", "🕸️ Графики и Life Wheel"),
+        teloxide::types::BotCommand::new("base", "🗄️ Управление базами знаний"),
+        teloxide::types::BotCommand::new("cancel", "❌ Отмена действия"),
         teloxide::types::BotCommand::new("help", "ℹ️ Справка и возможности"),
     ];
     if let Err(e) = bot.set_my_commands(commands).await {
         tracing::warn!("Failed to set bot commands menu: {}", e);
     }
 
-    // Start health-check server
-    let health_store = knowledge_store.clone();
+    // Start NodeBook OS Web Server & Mini App on port 8080
+    let web_state = web_server::AppState {
+        engine: engine.clone(),
+        downloader: Arc::new(brain_media_downloader::MediaDownloader::new("./downloads")),
+        analytics_engine: analytics_engine.clone(),
+        vault_registry: vault_registry.clone(),
+        download_tasks: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+    };
     tokio::spawn(async move {
-        use axum::{routing::get, Router, http::StatusCode};
-        let app = Router::new().route("/health", get(move || {
-            let store = health_store.clone();
-            async move {
-                // Try to hit the DB
-                match store.get_metrics_report().await {
-                    Ok(_) => (StatusCode::OK, "OK"),
-                    Err(_) => (StatusCode::SERVICE_UNAVAILABLE, "DB ERROR"),
-                }
-            }
-        }));
-        
-        let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
-        tracing::info!("Health check server listening on port 8080");
-        if let Err(e) = axum::serve(listener, app).await {
-            tracing::error!("Health server error: {}", e);
-        }
+        web_server::start_web_server(web_state, 8080).await;
     });
+
+    // Start Cloudflare HTTPS Tunnel for Telegram Mini App
+    let tunnel_manager = Arc::new(tunnel::TunnelManager::new());
+    tunnel_manager.start(bot.clone()).await;
 
     // Start scheduler
     {
@@ -302,6 +300,7 @@ async fn main() -> anyhow::Result<()> {
     let ae_msg = analytics_engine.clone();
     let vr_msg = vault_registry.clone();
     let pr_msg = plugin_registry.clone();
+    let tm_msg = tunnel_manager.clone();
     let message_handler = Update::filter_message().endpoint(
         move |bot: teloxide::Bot, msg: teloxide::types::Message| {
             let engine = engine_msg.clone();
@@ -309,8 +308,9 @@ async fn main() -> anyhow::Result<()> {
             let ae = ae_msg.clone();
             let vr = vr_msg.clone();
             let pr = pr_msg.clone();
+            let tm = tm_msg.clone();
             async move {
-                if let Err(e) = handlers::message::handle_message(bot, msg, engine, sm, ae, vr, pr).await {
+                if let Err(e) = handlers::message::handle_message(bot, msg, engine, sm, ae, vr, pr, tm).await {
                     tracing::error!("Message handler error: {}", e);
                 }
                 Ok::<(), std::convert::Infallible>(())
@@ -355,24 +355,29 @@ async fn main() -> anyhow::Result<()> {
                                 let chat_id = teloxide::types::ChatId(user_id as i64);
                                 use teloxide::requests::Requester;
                                 
-                                let tags_str = entry.classification.tags.iter().map(|t| format!("#{}", t)).collect::<Vec<_>>().join(" ");
+                                let tags_str = entry.classification.tags.iter().map(|t| format!("#{}", teloxide::utils::html::escape(t))).collect::<Vec<_>>().join(" ");
                                 let mut reply = format!("✅ <b>Сохранено:</b> {}\n\n{}\n\n📂 {}\n🏷 {}", 
-                                    entry.classification.suggested_title,
-                                    entry.classification.summary,
-                                    entry.classification.area,
+                                    teloxide::utils::html::escape(&entry.classification.suggested_title),
+                                    teloxide::utils::html::escape(&entry.classification.summary),
+                                    teloxide::utils::html::escape(&entry.classification.area.to_string()),
                                     tags_str
                                 );
 
                                 if let brain_common::SourcingEvent::EntryStored { path } = record.event {
-                                    reply.push_str(&format!("\n📝 <code>{}</code>", path));
+                                    reply.push_str(&format!("\n📝 <code>{}</code>", teloxide::utils::html::escape(&path)));
                                 }
 
                                 if let Some(msg_id) = processing_msg_id {
-                                    let _ = bot_clone.edit_message_text(chat_id, teloxide::types::MessageId(msg_id as i32), reply)
+                                    let res = bot_clone.edit_message_text(chat_id, teloxide::types::MessageId(msg_id as i32), &reply)
                                         .parse_mode(teloxide::types::ParseMode::Html)
                                         .await;
+                                    if res.is_err() {
+                                        let _ = bot_clone.send_message(chat_id, &reply)
+                                            .parse_mode(teloxide::types::ParseMode::Html)
+                                            .await;
+                                    }
                                 } else {
-                                    let _ = bot_clone.send_message(chat_id, reply)
+                                    let _ = bot_clone.send_message(chat_id, &reply)
                                         .parse_mode(teloxide::types::ParseMode::Html)
                                         .await;
                                 }

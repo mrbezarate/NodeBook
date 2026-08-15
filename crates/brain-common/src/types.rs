@@ -255,7 +255,16 @@ pub enum SourcingEvent {
     LlmProcessRequested { text: String, source: EntrySource },
     EmbeddingProcessRequested { text: String },
     
-    LlmProcessed { title: Option<String>, summary: String, tags: Vec<String>, enriched_text: Option<String> },
+    LlmProcessed { 
+        title: Option<String>, 
+        summary: String, 
+        tags: Vec<String>, 
+        enriched_text: Option<String>,
+        #[serde(default)]
+        area: Option<String>,
+        #[serde(default)]
+        para: Option<String>,
+    },
     EmbeddingGenerated { vector_id: String },
     EntryStored { path: String },
     FallbackTriggered { reason: String },
@@ -316,7 +325,10 @@ impl BrainEntry {
                 entities: vec![],
                 tags: vec![],
                 confidence: 0.1,
-                suggested_title: format!("Unprocessed: {}", &text[0..20.min(text.len())]),
+                suggested_title: {
+                    let preview: String = text.chars().take(20).collect();
+                    format!("Unprocessed: {}", preview)
+                },
                 suggested_links: vec![],
                 summary: "This entry was created as a fallback due to a pipeline failure.".to_string(),
                 enriched_text: None,
@@ -407,4 +419,20 @@ pub struct SystemMetricsReport {
     pub total_entities: i64,
     pub total_observations: i64,
     pub avg_obs_per_entity: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fallback_unicode_safety() {
+        let cyrillic_text = "Привет, это длинная тестовая строка на русском языке для проверки UTF-8 границы.";
+        let entry = BrainEntry::fallback(cyrillic_text, EntrySource::Cli);
+        assert!(entry.classification.suggested_title.starts_with("Unprocessed: Привет, это длинная"));
+
+        let emoji_text = "🎉🚀🔥💡✨🌟⭐📝🔍📊🎯⚡😊😴🏃";
+        let entry2 = BrainEntry::fallback(emoji_text, EntrySource::Cli);
+        assert_eq!(entry2.classification.suggested_title, format!("Unprocessed: {}", emoji_text));
+    }
 }

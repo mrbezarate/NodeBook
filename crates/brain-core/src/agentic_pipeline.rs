@@ -1,5 +1,5 @@
 use crate::traits::{AiProvider, ContextManager, EntityExtractor, VectorStorage};
-use brain_common::{BrainEntry, BrainError, Classification, EntryId, EntrySource, Result, SemanticLink};
+use brain_common::{BrainEntry, Classification, EntryId, EntrySource, Result, SemanticLink};
 use std::sync::Arc;
 use chrono::Utc;
 
@@ -60,6 +60,13 @@ impl AgenticPipeline {
             r#"You are a Personal Knowledge Engine. Your job is to process a new text entry and build a Knowledge Graph node.
 Analyze the new text in the context of the user's memory. Determine if this is a brand new idea, a continuation of an existing project, or a duplicate.
 
+IMPORTANT LANGUAGE RULE: ALL your output MUST be in Russian (Русский язык). This includes:
+- title — always in Russian (translate from English if needed)
+- summary — always in Russian (translate from English if needed)
+- tags — use Russian transliteration or Russian words where natural (e.g. "геймдев", "программирование", "финансы"), but keep widely-known English terms as-is (e.g. "rust", "api", "rpg")
+- enriched_text — keep the original language of the user's message, but wikilinks can stay as-is
+If the user wrote in English, translate title and summary into natural Russian.
+
 Memory Context:
 {}
 
@@ -70,11 +77,11 @@ Extracted Entities:
 {:?}
 
 Instructions:
-1. Title: Create a highly specific noun or proper noun for the title (e.g. "Екдрасиль" instead of "Idea for a game"). If none exists, synthesize a 1-3 word noun phrase.
+1. Title: Create a highly specific noun or proper noun for the title (e.g. "Екдрасиль" instead of "Idea for a game"). If none exists, synthesize a 1-3 word noun phrase. MUST be in Russian.
 2. Type & Area: Choose appropriate type (Project, Idea, Knowledge, Task, etc.) and Area (GameDev, Career, etc.).
 3. PARA: Is it a Project (active), Area (ongoing responsibility), Resource (reference material), or Archive?
-4. Summary: Generate a concise summary of the knowledge (2-3 sentences max).
-5. Tags: Extract a comprehensive list of tags (lowercase, no spaces, e.g., "gamedev", "rpg", "procedural_generation").
+4. Summary: Generate a concise summary of the knowledge (2-3 sentences max). MUST be in Russian.
+5. Tags: Extract a comprehensive list of tags (lowercase, no spaces, e.g., "геймдев", "rpg", "процедурная_генерация").
 6. Semantic Edges: Describe the relations this note has with other concepts. (target, relation type like "InspiredBy", "SimilarTo", "HasFeature").
 7. Enriched Text: Take the exact original user message, but replace any mentioned entities, concepts, or project names with Obsidian wikilinks (e.g. wrap them in [[...]] like `проект [[Екдрасиль]]`). Do not change the tone, grammar, or words otherwise.
 
@@ -122,7 +129,85 @@ Output strictly in JSON format matching this schema:
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
 
-        let parsed = parsed.ok_or_else(|| BrainError::Parser(format!("Failed after 3 retries. Last error: {}", last_err)))?;
+        let parsed = match parsed {
+            Some(p) => p,
+            None => {
+                tracing::warn!("LLM provider unavailable or failed ({}), applying rule-based intelligent parser fallback", last_err);
+                
+                // Rule-based Title extraction
+                let first_line = clean_text.lines().next().unwrap_or(clean_text).trim();
+                let title = if let Some(stripped) = first_line.strip_prefix('#') {
+                    stripped.trim().to_string()
+                } else {
+                    let words: Vec<&str> = first_line.split_whitespace().collect();
+                    if words.len() <= 6 {
+                        first_line.trim_end_matches(['.', '!', '?']).to_string()
+                    } else {
+                        format!("{}...", words[..6].join(" "))
+                    }
+                };
+
+                // Rule-based Summary extraction (first 1-2 sentences)
+                let sentences: Vec<&str> = clean_text.split(['.', '!', '?']).map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+                let summary = if sentences.len() >= 2 {
+                    format!("{}. {}.", sentences[0], sentences[1])
+                } else if let Some(first) = sentences.first() {
+                    format!("{}.", first)
+                } else {
+                    clean_text.chars().take(200).collect::<String>()
+                };
+
+                // Rule-based Area detection
+                let lower = clean_text.to_lowercase();
+                let area = if lower.contains("код") || lower.contains("rust") || lower.contains("python") || lower.contains("api") || lower.contains("сервер") || lower.contains("база") {
+                    "Programming"
+                } else if lower.contains("игра") || lower.contains("game") || lower.contains("геймдев") {
+                    "GameDev"
+                } else if lower.contains("деньги") || lower.contains("финанс") || lower.contains("доход") || lower.contains("инвест") {
+                    "Finance"
+                } else if lower.contains("психол") || lower.contains("человек") || lower.contains("lookism") || lower.contains("looksmax") || lower.contains("отношен") || lower.contains("обществ") {
+                    "Psychology"
+                } else if lower.contains("работ") || lower.contains("карьер") || lower.contains("проект") {
+                    "Career"
+                } else {
+                    "Life"
+                };
+
+                // Rule-based PARA routing
+                let para = if lower.contains("проект") || lower.contains("todo") || lower.contains("сделать") {
+                    "Projects"
+                } else if lower.contains("сфера") || lower.contains("ответственност") || lower.contains("здоровь") || lower.contains("привычк") {
+                    "Areas"
+                } else {
+                    "Resources"
+                };
+
+                // Rule-based Tags extraction
+                let mut tags = Vec::new();
+                for word in lower.split(|c: char| !c.is_alphanumeric() && c != '_') {
+                    let w = word.trim();
+                    if w.len() >= 4 && !tags.contains(&w.to_string()) {
+                        if ["looksmax", "lookism", "blackpill", "психология", "общество", "красота", "развитие", "карьера", "программирование"].contains(&w) {
+                            tags.push(w.to_string());
+                        }
+                    }
+                }
+                if tags.is_empty() {
+                    tags.push(area.to_lowercase());
+                }
+
+                AgenticOutput {
+                    title,
+                    entry_type: "Knowledge".to_string(),
+                    area: area.to_string(),
+                    para: para.to_string(),
+                    summary,
+                    tags,
+                    semantic_edges: vec![],
+                    enriched_text: Some(clean_text.to_string()),
+                }
+            }
+        };
 
         // Convert parsed strings to enums safely
         let entry_type = match parsed.entry_type.as_str() {

@@ -1,5 +1,4 @@
 use plotters::prelude::*;
-use std::collections::HashMap;
 
 /// Generate a radar chart (Hexagram) for metrics
 pub fn draw_radar_chart(
@@ -10,6 +9,7 @@ pub fn draw_radar_chart(
         return Err("Invalid data".into());
     }
     
+    crate::init_fonts();
     let mut buffer = vec![0; 800 * 600 * 3];
     {
         let root = BitMapBackend::with_buffer(&mut buffer, (800, 600)).into_drawing_area();
@@ -111,4 +111,35 @@ pub fn draw_radar_chart(
     }
 
     Ok(png_data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_draw_radar_chart_valid() {
+        let categories = vec![
+            "Здоровье".to_string(),
+            "Работа".to_string(),
+            "Финансы".to_string(),
+            "Обучение".to_string(),
+            "Отношения".to_string(),
+            "Отдых".to_string(),
+        ];
+        let values = vec![0.8, 0.9, 0.7, 0.85, 0.6, 0.5];
+        let res = draw_radar_chart(&categories, &values);
+        assert!(res.is_ok());
+        let png = res.unwrap();
+        assert!(!png.is_empty());
+        assert_eq!(&png[1..4], b"PNG");
+    }
+
+    #[test]
+    fn test_draw_radar_chart_mismatched_len() {
+        let categories = vec!["A".to_string(), "B".to_string()];
+        let values = vec![0.5];
+        let res = draw_radar_chart(&categories, &values);
+        assert!(res.is_err());
+    }
 }
