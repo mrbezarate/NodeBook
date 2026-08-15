@@ -708,33 +708,41 @@ impl MediaDownloader {
             }
         }
 
-        let download_target = if let Some(found_url) = Self::search_spotify_track(artist, title).await {
-            info!("Found exact YouTube match for {} - {}: {}", artist, title, found_url);
-            found_url
-        } else {
-            format!("ytsearch1:{} {} audio", artist, title)
-        };
+        let mut download_targets = Vec::new();
+        if !artist.is_empty() {
+            download_targets.push(format!("scsearch1:{} {}", artist, title));
+            download_targets.push(format!("scsearch5:{} {}", artist, title));
+        }
+        if let Some(found_url) = Self::search_spotify_track(artist, title).await {
+            download_targets.push(found_url);
+        } else if !artist.is_empty() {
+            download_targets.push(format!("ytsearch1:{} {} audio", artist, title));
+        }
+        download_targets.push(format!("scsearch3:{}", title));
+        download_targets.push(format!("ytsearch1:{} audio", title));
 
-        let mut cmd = Self::ytdlp_cmd();
-        cmd.arg("-o").arg(&output_template);
-        cmd.arg("--no-playlist");
-        cmd.arg("--no-warnings");
-        cmd.args(["--extractor-args", "youtube:player_client=ios,android,web"]);
-        cmd.args([
-            "-x",
-            "--audio-format", "mp3",
-            "--audio-quality", "0",
-            "--embed-metadata",
-            "--add-metadata",
-        ]);
-        cmd.arg(&download_target);
+        let mut downloaded_path = None;
+        for target in download_targets {
+            let mut cmd = Self::ytdlp_cmd();
+            cmd.arg("-o").arg(&output_template);
+            cmd.arg("--no-playlist");
+            cmd.arg("--no-warnings");
+            cmd.args(["--extractor-args", "youtube:player_client=ios,android,web"]);
+            cmd.args([
+                "-x",
+                "--audio-format", "mp3",
+                "--audio-quality", "0",
+                "--embed-metadata",
+                "--add-metadata",
+            ]);
+            cmd.arg(&target);
 
-        let status = cmd.status().await;
-        let downloaded_path = if status.as_ref().map_or(false, |s| s.success()) && expected_file.exists() {
-            expected_file
-        } else {
-            let mut found = None;
-            if let Ok(entries) = std::fs::read_dir(&self.download_dir) {
+            let status = cmd.status().await;
+            if status.as_ref().map_or(false, |s| s.success()) && expected_file.exists() {
+                downloaded_path = Some(expected_file.clone());
+                break;
+            } else if let Ok(entries) = std::fs::read_dir(&self.download_dir) {
+                let mut found = None;
                 for entry in entries.flatten() {
                     let path = entry.path();
                     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
@@ -743,9 +751,14 @@ impl MediaDownloader {
                         break;
                     }
                 }
+                if let Some(p) = found {
+                    downloaded_path = Some(p);
+                    break;
+                }
             }
-            found.ok_or_else(|| anyhow::anyhow!("Failed to download Spotify audio for {} - {}", artist, title))?
-        };
+        }
+
+        let downloaded_path = downloaded_path.ok_or_else(|| anyhow::anyhow!("Failed to download Spotify audio for {} - {}", artist, title))?;
 
         // Write Spotify cover after yt-dlp finishes so it is never deleted
         let has_cover = if let Some(ref bytes) = cover_bytes {
