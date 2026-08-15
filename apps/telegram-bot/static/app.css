@@ -2705,3 +2705,19 @@ body {
   object-fit: contain;
   border-radius: var(--radius-sm);
 }
+
+/* ── Live Reactive Transitions ───────────────────────────── */
+@keyframes liveItemFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.track-card, .video-card, .pin-card {
+  animation: liveItemFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}

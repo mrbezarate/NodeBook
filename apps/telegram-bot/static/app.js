@@ -2162,6 +2162,77 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // ── 16. Initial Data Load ─────────────────────────────────────────────────
+  // ── 16. Live Background Auto-Sync Engine ──────────────────────────────────
+  let isLiveSyncing = false;
+
+  async function runLiveSync() {
+    if (isLiveSyncing) return;
+    if (document.hidden) return; // Save resources when tab is backgrounded
+
+    isLiveSyncing = true;
+    try {
+      // 1. Sync tracks
+      const tracksRes = await authFetch('/api/player/tracks');
+      if (tracksRes.ok) {
+        const newTracks = await tracksRes.json();
+        if (JSON.stringify(newTracks) !== JSON.stringify(state.tracks)) {
+          const playingTrack = state.tracks[state.currentTrackIndex];
+          state.tracks = newTracks;
+          if (playingTrack) {
+            const newIdx = state.tracks.findIndex(t => t.id === playingTrack.id);
+            if (newIdx !== -1) state.currentTrackIndex = newIdx;
+          }
+          renderMusicTab();
+          renderPlaylistChips();
+        }
+      }
+
+      // 2. Sync videos
+      const videosRes = await authFetch('/api/media/videos');
+      if (videosRes.ok) {
+        const newVideos = await videosRes.json();
+        if (JSON.stringify(newVideos) !== JSON.stringify(state.videos)) {
+          state.videos = newVideos;
+          renderMediaTab();
+          renderPlaylistChips();
+        }
+      }
+
+      // 3. Sync pins
+      const pinsRes = await authFetch('/api/media/pins');
+      if (pinsRes.ok) {
+        const newPins = await pinsRes.json();
+        if (JSON.stringify(newPins) !== JSON.stringify(state.pins)) {
+          state.pins = newPins;
+          renderPinsTab();
+        }
+      }
+
+      // 4. Sync playlists
+      const plRes = await authFetch('/api/playlists');
+      if (plRes.ok) {
+        const newPl = await plRes.json();
+        if (JSON.stringify(newPl) !== JSON.stringify(state.playlists)) {
+          state.playlists = newPl;
+          renderPlaylistChips();
+        }
+      }
+    } catch (e) {
+      // Silent catch during live background sync
+    } finally {
+      isLiveSyncing = false;
+    }
+  }
+
+  // Periodic live sync every 2.5 seconds
+  setInterval(runLiveSync, 2500);
+
+  // Instant live sync on window/tab focus
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) runLiveSync();
+  });
+  window.addEventListener('focus', runLiveSync);
+
+  // Initial Data Load
   fetchAllData();
 });
