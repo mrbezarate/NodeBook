@@ -13,6 +13,7 @@ use async_trait::async_trait;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct FixtureEvent {
     description: String,
     raw_event_text: String,

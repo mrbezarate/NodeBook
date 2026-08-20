@@ -26,7 +26,7 @@
         <span>Проверка подлинности Telegram...</span>
       </div>
       <div class="security-hint">
-        🛡️ Защищено криптографической подписью Telegram HMAC-SHA256. Вход с чужих аккаунтов заблокирован.
+        Защищено криптографической подписью Telegram HMAC-SHA256. Вход с чужих аккаунтов заблокирован.
       </div>
     </div>
   </div>
@@ -623,9 +623,15 @@
       <div class="modal-sheet note-reader-sheet">
         <div class="sheet-header">
           <div class="reader-path-breadcrumbs" id="reader-breadcrumbs">
-            <span class="root-tag">🗂️ Vault</span> / <span id="reader-crumb-folder">📁 00_Daily</span> / <span class="active-file" id="reader-crumb-file">Note.md</span>
+            <span class="root-tag">Vault</span> / <span id="reader-crumb-folder">00_Daily</span> / <span class="active-file" id="reader-crumb-file">Note.md</span>
           </div>
           <div class="sheet-header-actions">
+            <button class="sheet-icon-btn del-btn" id="btn-reader-delete" title="Удалить запись">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+            </button>
             <button class="sheet-icon-btn" id="btn-reader-prop" title="Свойства и метаданные">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="3"></circle>
@@ -650,7 +656,7 @@
           </div>
 
           <div class="reader-summary-card" id="reader-summary-card" style="display: none;">
-            <div class="summary-badge">⚡ ИИ Выжимка</div>
+            <div class="summary-badge">ИИ Выжимка</div>
             <div class="summary-text" id="reader-summary-text"></div>
           </div>
 
@@ -683,7 +689,7 @@
     <div class="modal-overlay" id="pin-modal" style="display: none;">
       <div class="pin-modal-card">
         <div class="sheet-header">
-          <h3 class="sheet-title" id="pin-modal-title">📌 Pin</h3>
+          <h3 class="sheet-title" id="pin-modal-title">Pin</h3>
           <div class="sheet-header-actions">
             <a id="btn-pin-download" class="sheet-icon-btn" download title="Скачать оригинал">
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">

@@ -1,8 +1,7 @@
 use teloxide::{prelude::*, types::InputFile};
 use std::sync::Arc;
 use brain_core::engine::BrainEngine;
-use teloxide::types::{InlineKeyboardMarkup, InlineKeyboardButton};
-use chrono::{Datelike, Local, NaiveDate};
+use chrono::{Datelike, Local};
 use std::collections::HashMap;
 
 use crate::handlers::analytics::analytics_viz_keyboard;
@@ -11,7 +10,7 @@ use crate::handlers::analytics::analytics_viz_keyboard;
 pub async fn handle_visual_command(
     bot: Bot,
     msg: Message,
-    engine: Arc<BrainEngine>,
+    _engine: Arc<BrainEngine>,
 ) -> anyhow::Result<()> {
     bot.send_message(msg.chat.id, "📊 Выберите тип визуальной аналитики:")
         .reply_markup(analytics_viz_keyboard())
@@ -33,8 +32,8 @@ pub async fn handle_visual_callback(
             let today = Local::now().date_naive();
             let mut activity_data = HashMap::new();
             
-            // Fetch stats from DB (this is mocked here, ideally we fetch real event counts)
-            let stats = engine.get_stats().await?;
+            // Fetch stats from DB
+            let _stats = engine.get_stats().await?;
             // We just populate some dummy data for demonstration if no real event log API is easy to access here
             // In a real system, we would query the event log or vault for creations per day.
             for i in 0..30 {

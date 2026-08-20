@@ -17,6 +17,66 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // ── 0.1 Modal Stack & Native Telegram BackButton ──────────────────────────
+  const modalStack = [];
+
+  function pushModal(modalElement, onCloseCallback) {
+    if (!modalElement) return;
+    modalStack.push({ el: modalElement, close: onCloseCallback });
+    if (window.Telegram?.WebApp?.BackButton) {
+      try {
+        window.Telegram.WebApp.BackButton.show();
+      } catch (e) {}
+    }
+  }
+
+  function popModal(modalElement) {
+    if (!modalElement) return;
+    const idx = modalStack.findLastIndex(m => m.el === modalElement);
+    if (idx !== -1) {
+      modalStack.splice(idx, 1);
+    }
+    if (modalStack.length === 0 && window.Telegram?.WebApp?.BackButton) {
+      try {
+        window.Telegram.WebApp.BackButton.hide();
+      } catch (e) {}
+    }
+  }
+
+  function closeTopModal() {
+    if (modalStack.length > 0) {
+      const top = modalStack.pop();
+      if (top && typeof top.close === 'function') {
+        top.close();
+      } else if (top?.el) {
+        top.el.style.display = 'none';
+        top.el.classList.remove('active');
+      }
+      if (modalStack.length === 0 && window.Telegram?.WebApp?.BackButton) {
+        try {
+          window.Telegram.WebApp.BackButton.hide();
+        } catch (e) {}
+      }
+      return true;
+    }
+    return false;
+  }
+
+  if (window.Telegram?.WebApp?.BackButton) {
+    try {
+      window.Telegram.WebApp.BackButton.onClick(() => {
+        closeTopModal();
+      });
+    } catch (e) {}
+  }
+
+  // Keyboard ESC support for desktop browser
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeTopModal();
+    }
+  });
+
   // ── 1. App State ──────────────────────────────────────────────────────────
   const state = {
     activeTab: 'music',
@@ -28,6 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
     musicFilterArtist: null,
     musicSearchQuery: '',
     currentTrackIndex: -1,
+    currentTrackId: null,
     isPlaying: false,
     isShuffle: false,
     isRepeat: false,
@@ -207,6 +268,7 @@ document.addEventListener('DOMContentLoaded', () => {
     noteReaderModal: document.getElementById('note-reader-modal'),
     btnCloseReaderModal: document.getElementById('btn-close-reader-modal'),
     btnReaderProp: document.getElementById('btn-reader-prop'),
+    btnReaderDelete: document.getElementById('btn-reader-delete'),
     readerCrumbFolder: document.getElementById('reader-crumb-folder'),
     readerCrumbFile: document.getElementById('reader-crumb-file'),
     readerTitle: document.getElementById('reader-title'),
@@ -272,7 +334,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (tgInitData) {
       options.headers['X-Telegram-Init-Data'] = tgInitData;
     }
-    const res = await fetch(url, options);
+    const separator = url.includes('?') ? '&' : '?';
+    const finalUrl = tgInitData ? `${url}${separator}initData=${encodeURIComponent(tgInitData)}` : url;
+    const res = await fetch(finalUrl, options);
     if (res.status === 401 || res.status === 403) {
       let errMsg = '';
       try {
@@ -289,6 +353,24 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!tgInitData) return url;
     const separator = url.includes('?') ? '&' : '?';
     return `${url}${separator}initData=${encodeURIComponent(tgInitData)}`;
+  }
+
+  function confirmAction(message) {
+    return new Promise((resolve) => {
+      if (window.Telegram && window.Telegram.WebApp && typeof window.Telegram.WebApp.showConfirm === 'function') {
+        try {
+          window.Telegram.WebApp.showConfirm(message, (ok) => resolve(!!ok));
+          return;
+        } catch (e) {
+          console.warn('Telegram showConfirm failed, falling back to window.confirm:', e);
+        }
+      }
+      try {
+        resolve(window.confirm(message));
+      } catch (e) {
+        resolve(true);
+      }
+    });
   }
 
   // ── 3. Utility Helpers ────────────────────────────────────────────────────
@@ -505,13 +587,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const { task_id } = await startRes.json();
 
-        // Poll task status until done or error
+        // Poll task status until done or error (up to 600 attempts ~ 4.5 minutes)
         let isDone = false;
-        while (!isDone) {
-          await new Promise(r => setTimeout(r, 450));
-          const statusRes = await authFetch(`/api/media/download/task/${task_id}`);
-          if (!statusRes.ok) break;
+        let pollAttempts = 0;
+        let consecutiveErrors = 0;
 
+        while (!isDone && pollAttempts < 600) {
+          pollAttempts++;
+          await new Promise(r => setTimeout(r, 450));
+
+          let statusRes;
+          try {
+            statusRes = await authFetch(`/api/media/download/task/${task_id}`);
+          } catch (e) {
+            consecutiveErrors++;
+            if (consecutiveErrors >= 8) {
+              throw new Error('Связь с сервером прервана');
+            }
+            continue;
+          }
+
+          if (!statusRes.ok) {
+            consecutiveErrors++;
+            if (consecutiveErrors >= 8 || statusRes.status === 404) {
+              throw new Error('Задача не найдена или прервана');
+            }
+            continue;
+          }
+
+          consecutiveErrors = 0;
           const data = await statusRes.json();
           task.progressPct = data.percent || task.progressPct;
 
@@ -555,6 +659,10 @@ document.addEventListener('DOMContentLoaded', () => {
           } else if (data.status === 'error') {
             throw new Error(data.error || 'Ошибка загрузки');
           }
+        }
+
+        if (!isDone) {
+          throw new Error('Время ожидания загрузки истекло');
         }
       } catch (err) {
         task.progressPct = 100;
@@ -619,14 +727,19 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // History Modal Handlers
-  el.btnOpenHistoryModal.addEventListener('click', () => {
+  function openHistoryModal() {
     renderDownloadHistory();
     el.downloadHistoryModal.style.display = 'flex';
-  });
+    pushModal(el.downloadHistoryModal, closeHistoryModal);
+  }
 
-  el.btnCloseHistoryModal.addEventListener('click', () => {
+  function closeHistoryModal() {
     el.downloadHistoryModal.style.display = 'none';
-  });
+    popModal(el.downloadHistoryModal);
+  }
+
+  el.btnOpenHistoryModal.addEventListener('click', openHistoryModal);
+  el.btnCloseHistoryModal.addEventListener('click', closeHistoryModal);
 
   el.btnClearHistory.addEventListener('click', () => {
     localStorage.removeItem('nb_dl_history');
@@ -646,7 +759,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     for (const url of urls) {
       if (isPureVideoUrl(url) && !url.includes('spotify.com') && !url.includes('soundcloud.com')) {
-        showStatus('⚠️ Эта ссылка содержит видео. Используйте вкладку «Видео»', 'error');
+        showStatus('Эта ссылка содержит видео. Используйте вкладку «Видео»', 'error');
         return;
       }
       enqueueDownload(url, true);
@@ -669,7 +782,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     for (const url of urls) {
       if (url.includes('spotify.com') || url.includes('soundcloud.com')) {
-        showStatus('⚠️ Spotify и SoundCloud не содержат видео. Используйте вкладку «Музыка»', 'error');
+        showStatus('Spotify и SoundCloud не содержат видео. Используйте вкладку «Музыка»', 'error');
         return;
       }
       enqueueDownload(url, false);
@@ -680,6 +793,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ── 7. Music Player Logic ─────────────────────────────────────────────────
+  function parseArtistList(uploaderStr) {
+    if (!uploaderStr) return [];
+    return uploaderStr
+      .split(/[,;\/&]|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b/i)
+      .map(s => s.trim().replace(/^[\(\[\"']+|[\)\]\"']+$/g, '').trim())
+      .filter(s => s.length > 0);
+  }
+
   function getFilteredTracks() {
     let list = [...state.tracks];
 
@@ -691,7 +812,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (state.musicFilterArtist) {
-      list = list.filter(t => (t.uploader || '').toLowerCase() === state.musicFilterArtist.toLowerCase());
+      const target = state.musicFilterArtist.toLowerCase();
+      list = list.filter(t => {
+        const artists = parseArtistList(t.uploader);
+        return artists.some(a => a.toLowerCase() === target) || (t.uploader || '').toLowerCase() === target;
+      });
     }
 
     if (state.musicSearchQuery.trim()) {
@@ -705,9 +830,50 @@ document.addEventListener('DOMContentLoaded', () => {
     return list;
   }
 
-  function playTrackByIndex(index) {
-    const list = getFilteredTracks();
-    if (index < 0 || index >= list.length) return;
+  function getCurrentTrack() {
+    if (!state.currentTrackId) return null;
+    return state.tracks.find(t => t.id === state.currentTrackId) || null;
+  }
+
+  function updateMediaSession(track, coverUrl) {
+    if ('mediaSession' in navigator && track) {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: track.title || 'Трек',
+          artist: track.uploader || 'Исполнитель',
+          album: 'NodeBook OS',
+          artwork: [
+            { src: coverUrl, sizes: '300x300', type: 'image/jpeg' },
+            { src: coverUrl, sizes: '512x512', type: 'image/jpeg' },
+          ],
+        });
+
+        navigator.mediaSession.setActionHandler('play', () => {
+          el.audio.play();
+          state.isPlaying = true;
+          updateAudioPlayPauseIcons();
+        });
+        navigator.mediaSession.setActionHandler('pause', () => {
+          el.audio.pause();
+          state.isPlaying = false;
+          updateAudioPlayPauseIcons();
+        });
+        navigator.mediaSession.setActionHandler('previoustrack', () => playPrevAudioTrack());
+        navigator.mediaSession.setActionHandler('nexttrack', () => playNextAudioTrack());
+        navigator.mediaSession.setActionHandler('seekto', (details) => {
+          if (details.seekTime !== undefined && el.audio.duration) {
+            el.audio.currentTime = details.seekTime;
+          }
+        });
+      } catch (e) {
+        console.warn('MediaSession error:', e);
+      }
+    }
+  }
+
+  function playTrackById(trackId) {
+    const track = state.tracks.find(t => t.id === trackId);
+    if (!track) return;
 
     // Pause video if playing
     if (!el.html5Video.paused) {
@@ -715,8 +881,10 @@ document.addEventListener('DOMContentLoaded', () => {
       updateVideoPlayState(false);
     }
 
-    state.currentTrackIndex = index;
-    const track = list[index];
+    state.currentTrackId = track.id;
+    const list = getFilteredTracks();
+    state.currentTrackIndex = list.findIndex(t => t.id === track.id);
+
     const streamUrl = authMediaUrl(`/api/player/stream/${track.id}`);
     const coverUrl = authMediaUrl(`/api/player/cover/${track.id}`);
 
@@ -724,20 +892,26 @@ document.addEventListener('DOMContentLoaded', () => {
     el.audio.play().then(() => {
       state.isPlaying = true;
       updateAudioPlayerUI(track, coverUrl);
+      updateMediaSession(track, coverUrl);
     }).catch(err => {
       console.warn('Playback error:', err);
     });
   }
 
+  function playTrackByIndex(index) {
+    const list = getFilteredTracks();
+    if (index < 0 || index >= list.length) return;
+    playTrackById(list[index].id);
+  }
+
   function toggleAudioPlayPause() {
-    if (!el.audio.src || state.currentTrackIndex === -1) {
+    if (!el.audio.src || !state.currentTrackId) {
       const list = getFilteredTracks();
-      if (list.length > 0) playTrackByIndex(0);
+      if (list.length > 0) playTrackById(list[0].id);
       return;
     }
 
     if (el.audio.paused) {
-      // Pause video if playing
       if (!el.html5Video.paused) {
         el.html5Video.pause();
         updateVideoPlayState(false);
@@ -759,8 +933,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const nextIdx = Math.floor(Math.random() * list.length);
       playTrackByIndex(nextIdx);
     } else {
-      let nextIdx = state.currentTrackIndex + 1;
-      if (nextIdx >= list.length) nextIdx = 0;
+      const currentIdx = list.findIndex(t => t.id === state.currentTrackId);
+      let nextIdx = currentIdx + 1;
+      if (nextIdx >= list.length || nextIdx < 0) nextIdx = 0;
       playTrackByIndex(nextIdx);
     }
   }
@@ -774,7 +949,8 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    let prevIdx = state.currentTrackIndex - 1;
+    const currentIdx = list.findIndex(t => t.id === state.currentTrackId);
+    let prevIdx = currentIdx - 1;
     if (prevIdx < 0) prevIdx = list.length - 1;
     playTrackByIndex(prevIdx);
   }
@@ -813,19 +989,19 @@ document.addEventListener('DOMContentLoaded', () => {
       el.miniIconPause.style.display = 'block';
       el.fsIconPlay.style.display = 'none';
       el.fsIconPause.style.display = 'block';
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
     } else {
       el.miniIconPlay.style.display = 'block';
       el.miniIconPause.style.display = 'none';
       el.fsIconPlay.style.display = 'block';
       el.fsIconPause.style.display = 'none';
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
     }
   }
 
   function highlightActiveTrackCard() {
-    const list = getFilteredTracks();
-    const currentTrack = list[state.currentTrackIndex];
     document.querySelectorAll('.track-card').forEach(card => {
-      if (currentTrack && card.dataset.id === currentTrack.id) {
+      if (state.currentTrackId && card.dataset.id === state.currentTrackId) {
         card.classList.add('active');
       } else {
         card.classList.remove('active');
@@ -865,14 +1041,26 @@ document.addEventListener('DOMContentLoaded', () => {
     updateAudioPlayPauseIcons();
   });
 
-  // Fullscreen open & close
-  el.miniClickable.addEventListener('click', () => {
-    el.fsPlayer.classList.add('active');
+  el.audio.addEventListener('error', (e) => {
+    console.warn('Audio playback error:', e);
+    state.isPlaying = false;
+    updateAudioPlayPauseIcons();
+    showStatus('Не удалось воспроизвести аудиофайл', 'error');
   });
 
-  el.fsBtnClose.addEventListener('click', () => {
+  // Fullscreen open & close with Modal Stack
+  function openFullscreenPlayer() {
+    el.fsPlayer.classList.add('active');
+    pushModal(el.fsPlayer, closeFullscreenPlayer);
+  }
+
+  function closeFullscreenPlayer() {
     el.fsPlayer.classList.remove('active');
-  });
+    popModal(el.fsPlayer);
+  }
+
+  el.miniClickable.addEventListener('click', openFullscreenPlayer);
+  el.fsBtnClose.addEventListener('click', closeFullscreenPlayer);
 
   // Audio Scrubber
   el.fsScrubberBar.addEventListener('click', (e) => {
@@ -914,17 +1102,15 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   el.fsBtnHeart.addEventListener('click', async () => {
-    const list = getFilteredTracks();
-    const track = list[state.currentTrackIndex];
-    if (!track) return;
-
-    await toggleFavoriteTrack(track.id);
+    if (state.currentTrackId) {
+      await toggleFavoriteTrack(state.currentTrackId);
+    }
   });
 
   el.fsBtnAddPlaylist.addEventListener('click', () => {
-    const list = getFilteredTracks();
-    const track = list[state.currentTrackIndex];
-    if (track) openPlaylistPicker(track.id, 'audio');
+    if (state.currentTrackId) {
+      openPlaylistPicker(state.currentTrackId, 'audio');
+    }
   });
 
   async function toggleFavoriteTrack(trackId) {
@@ -982,9 +1168,16 @@ document.addEventListener('DOMContentLoaded', () => {
     el.musicTrackList.innerHTML = list.map((track, idx) => {
       const coverUrl = authMediaUrl(`/api/player/cover/${track.id}`);
       const durationStr = track.duration_secs ? formatTime(track.duration_secs) : '3:20';
-      const isCurrent = state.currentTrackIndex === idx;
+      const isCurrent = state.currentTrackId === track.id;
       const isFav = favPl && favPl.item_ids.includes(track.id);
-      const artist = track.uploader || 'Исполнитель';
+      const rawArtist = track.uploader || 'Исполнитель';
+      const parsedArtists = parseArtistList(track.uploader);
+      const artistsHtml = parsedArtists.length > 0
+        ? parsedArtists.map((a, i) => {
+            const sep = i < parsedArtists.length - 1 ? '<span class="track-artist-sep">,</span>' : '';
+            return `<button class="track-artist-badge" data-artist="${escapeHtml(a)}" title="Все треки ${escapeHtml(a)}">${escapeHtml(a)}</button>${sep}`;
+          }).join('')
+        : `<button class="track-artist-badge" data-artist="${escapeHtml(rawArtist)}" title="Все треки исполнителя">${escapeHtml(rawArtist)}</button>`;
 
       return `
         <div class="track-card ${isCurrent ? 'active' : ''}" data-id="${escapeHtml(track.id)}" data-index="${idx}">
@@ -998,9 +1191,9 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
           <div class="track-info">
             <div class="track-title">${escapeHtml(track.title)}</div>
-            <button class="track-artist-badge" data-artist="${escapeHtml(artist)}" title="Все треки исполнителя">
-              ${escapeHtml(artist)}
-            </button>
+            <div class="track-artists-wrap">
+              ${artistsHtml}
+            </div>
           </div>
           <div class="track-right-meta">
             <span class="track-duration">${durationStr}</span>
@@ -1028,8 +1221,8 @@ document.addEventListener('DOMContentLoaded', () => {
     el.musicTrackList.querySelectorAll('.track-card').forEach(card => {
       card.addEventListener('click', (e) => {
         if (e.target.closest('.track-menu-btn') || e.target.closest('.track-artist-badge')) return;
-        const idx = parseInt(card.dataset.index, 10);
-        playTrackByIndex(idx);
+        const trackId = card.dataset.id;
+        playTrackById(trackId);
       });
     });
 
@@ -1052,7 +1245,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (action === 'add-pl') {
           openPlaylistPicker(id, 'audio');
         } else if (action === 'delete') {
-          if (confirm('Удалить этот трек из медиатеки?')) {
+          if (await confirmAction('Удалить этот трек из медиатеки?')) {
             await authFetch(`/api/media/${id}`, { method: 'DELETE' });
             await fetchAllData();
           }
@@ -1217,7 +1410,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (action === 'add-pl') {
           openPlaylistPicker(id, 'video');
         } else if (action === 'del') {
-          if (confirm('Удалить это видео из медиатеки?')) {
+          if (await confirmAction('Удалить это видео из медиатеки?')) {
             await authFetch(`/api/media/${id}`, { method: 'DELETE' });
             await fetchVideos();
           }
@@ -1318,7 +1511,7 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const id = btn.dataset.id;
-        if (confirm('Удалить этот пин из коллекции?')) {
+        if (await confirmAction('Удалить этот пин из коллекции?')) {
           await authFetch(`/api/media/${id}`, { method: 'DELETE' });
           await fetchPins();
         }
@@ -1331,17 +1524,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!el.pinModal) return;
     const fullImgUrl = authMediaUrl(`/api/media/thumb/${pin.id}`);
     el.pinModalImg.src = fullImgUrl;
-    el.pinModalTitle.textContent = pin.title || '📌 Pin';
+    el.pinModalTitle.textContent = pin.title || 'Pin';
     if (el.btnPinDownload) {
       el.btnPinDownload.href = fullImgUrl;
       el.btnPinDownload.setAttribute('download', `${pin.title || 'pin'}.jpg`);
     }
     el.pinModal.style.display = 'flex';
+    pushModal(el.pinModal, closePinModal);
   }
 
   function closePinModal() {
     if (el.pinModal) el.pinModal.style.display = 'none';
     state.activePin = null;
+    popModal(el.pinModal);
   }
 
   if (el.btnClosePinModal) {
@@ -1354,7 +1549,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   if (el.btnPinDelete) {
     el.btnPinDelete.addEventListener('click', async () => {
-      if (state.activePin && confirm('Удалить этот пин?')) {
+      if (state.activePin && await confirmAction('Удалить этот пин?')) {
         const id = state.activePin.id;
         closePinModal();
         await authFetch(`/api/media/${id}`, { method: 'DELETE' });
@@ -1433,7 +1628,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     renderVideoCarousel(videoItem);
     el.videoPlayerModal.style.display = 'flex';
+    pushModal(el.videoPlayerModal, closeVideoPlayerModal);
     resetControlsHideTimer();
+  }
+
+  function closeVideoPlayerModal() {
+    if (state.activeVideo) {
+      saveVideoProgress(state.activeVideo.id, el.html5Video.currentTime, el.html5Video.duration || 0);
+    }
+    el.videoPlayerModal.style.display = 'none';
+    el.html5Video.pause();
+    el.html5Video.src = '';
+    popModal(el.videoPlayerModal);
   }
 
   function toggleCustomVideoPlay() {
@@ -1529,6 +1735,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  el.html5Video.addEventListener('error', (e) => {
+    console.warn('Video playback error:', e);
+    updateVideoPlayState(false);
+    showStatus('Не удалось воспроизвести видеофайл', 'error');
+  });
+
   el.videoScrubberTrack.addEventListener('click', (e) => {
     const rect = el.videoScrubberTrack.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
@@ -1573,12 +1785,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   el.vmBtnDelete.addEventListener('click', async () => {
     if (state.activeVideo) {
-      if (confirm(`Удалить «${state.activeVideo.title}» из медиатеки?`)) {
+      if (await confirmAction(`Удалить «${state.activeVideo.title}» из медиатеки?`)) {
         localStorage.removeItem('nb_video_pos_' + state.activeVideo.id);
-        await authFetch(`/api/media/${state.activeVideo.id}`, { method: 'DELETE' });
-        el.videoPlayerModal.style.display = 'none';
-        el.html5Video.pause();
-        el.html5Video.src = '';
+        const vidId = state.activeVideo.id;
+        closeVideoPlayerModal();
+        await authFetch(`/api/media/${vidId}`, { method: 'DELETE' });
         await fetchVideos();
       }
     }
@@ -1587,20 +1798,12 @@ document.addEventListener('DOMContentLoaded', () => {
   el.vmAuthorBtn.addEventListener('click', () => {
     if (state.activeVideo && state.activeVideo.uploader) {
       state.mediaFilterAuthor = state.activeVideo.uploader;
-      el.videoPlayerModal.style.display = 'none';
-      el.html5Video.pause();
+      closeVideoPlayerModal();
       renderMediaTab();
     }
   });
 
-  el.btnCloseVideoModal.addEventListener('click', () => {
-    if (state.activeVideo) {
-      saveVideoProgress(state.activeVideo.id, el.html5Video.currentTime, el.html5Video.duration || 0);
-    }
-    el.videoPlayerModal.style.display = 'none';
-    el.html5Video.pause();
-    el.html5Video.src = '';
-  });
+  el.btnCloseVideoModal.addEventListener('click', closeVideoPlayerModal);
 
   function renderVideoCarousel(currentVideo) {
     const creatorVideos = state.videos.filter(v =>
@@ -1699,6 +1902,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function closePlaylistPicker() {
+    el.playlistPickerModal.style.display = 'none';
+    popModal(el.playlistPickerModal);
+  }
+
   function openPlaylistPicker(itemId, itemType) {
     state.pendingPlaylistItemId = itemId;
     const matching = state.playlists.filter(p => p.playlist_type === itemType);
@@ -1724,33 +1932,32 @@ document.addEventListener('DOMContentLoaded', () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ item_id: state.pendingPlaylistItemId }),
           });
-          el.playlistPickerModal.style.display = 'none';
+          closePlaylistPicker();
           await fetchPlaylists();
         });
       });
     }
 
     el.playlistPickerModal.style.display = 'flex';
+    pushModal(el.playlistPickerModal, closePlaylistPicker);
   }
 
-  el.btnClosePickerModal.addEventListener('click', () => {
-    el.playlistPickerModal.style.display = 'none';
-  });
+  el.btnClosePickerModal.addEventListener('click', closePlaylistPicker);
 
   // ── 12. Knowledge Vault Multi-Level Hierarchical Tree System ──────────────
   const PARA_METADATA = {
-    'projects': { key: 'Projects', label: '01_Projects (Проекты)', icon: '🚀' },
-    'areas': { key: 'Areas', label: '02_Areas (Сферы ответственности)', icon: '🌱' },
-    'resources': { key: 'Resources', label: '03_Resources (База знаний и ресурсы)', icon: '📚' },
-    'archive': { key: 'Archive', label: '04_Archive (Архив)', icon: '📦' },
-    'daily': { key: 'Daily', label: '00_Daily (Ежедневный дневник)', icon: '📅' },
+    'projects': { key: 'Projects', label: '01_Projects (Проекты)' },
+    'areas': { key: 'Areas', label: '02_Areas (Сферы ответственности)' },
+    'resources': { key: 'Resources', label: '03_Resources (База знаний и ресурсы)' },
+    'archive': { key: 'Archive', label: '04_Archive (Архив)' },
+    'daily': { key: 'Daily', label: '00_Daily (Ежедневный дневник)' },
   };
 
   function resolveCategoryMeta(rawCat) {
     if (!rawCat) return PARA_METADATA['daily'];
     const lower = rawCat.toLowerCase().trim();
     if (PARA_METADATA[lower]) return PARA_METADATA[lower];
-    return { key: rawCat, label: rawCat, icon: '📁' };
+    return { key: rawCat, label: rawCat };
   }
 
   function getFilteredNotes() {
@@ -1790,6 +1997,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     renderVaultTreeView(list);
+  }
+
+  async function deleteNoteById(noteId, noteTitle) {
+    const ok = await confirmAction(`Удалить запись "${noteTitle || 'запись'}" из базы знаний?`);
+    if (!ok) return;
+    try {
+      const res = await authFetch(`/api/vault/note/${encodeURIComponent(noteId)}`, { method: 'DELETE' });
+      if (res.ok) {
+        if (el.noteReaderModal) el.noteReaderModal.style.display = 'none';
+        state.notes = state.notes.filter(n => n.id !== noteId && n.title !== noteTitle);
+        renderVaultTab();
+        showStatus('Запись успешно удалена', 'success');
+      } else {
+        const data = await res.json().catch(() => ({}));
+        showStatus(data.error || 'Ошибка удаления записи', 'error');
+      }
+    } catch (err) {
+      console.error('Failed to delete note:', err);
+      showStatus('Ошибка при удалении записи', 'error');
+    }
   }
 
   // Pure Multi-Level Hierarchical Tree Explorer
@@ -1850,7 +2077,11 @@ document.addEventListener('DOMContentLoaded', () => {
               <svg class="tree-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5">
                 <polyline points="6 9 12 15 18 9"></polyline>
               </svg>
-              <span class="tree-folder-icon">${node.meta.icon}</span>
+              <span class="tree-folder-icon">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+              </span>
               <span class="tree-folder-name">${escapeHtml(node.meta.label)}</span>
             </div>
             <span class="tree-folder-count">${node.totalCount} ${node.totalCount === 1 ? 'файл' : 'файлов'}</span>
@@ -1872,7 +2103,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 <svg class="tree-chevron" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5">
                   <polyline points="6 9 12 15 18 9"></polyline>
                 </svg>
-                <span class="tree-folder-icon">${isSubCollapsed ? '📁' : '📂'}</span>
+                <span class="tree-folder-icon">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                  </svg>
+                </span>
                 <span class="tree-folder-name">${escapeHtml(subName)}</span>
               </div>
               <span class="tree-folder-count">${subNotes.length}</span>
@@ -1882,13 +2117,24 @@ document.addEventListener('DOMContentLoaded', () => {
               ${subNotes.map(note => `
                 <div class="tree-file-item" data-note-id="${escapeHtml(note.id)}">
                   <div class="tree-file-left">
-                    <span class="tree-file-icon">📄</span>
+                    <span class="tree-file-icon">
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                      </svg>
+                    </span>
                     <span class="tree-file-title">${escapeHtml(note.title)}</span>
                     <span class="tree-file-ext">.md</span>
                   </div>
                   <div class="tree-file-right">
-                    ${note.ai_summary ? '<span class="tree-file-has-ai">⚡ ИИ</span>' : ''}
+                    ${note.ai_summary ? '<span class="tree-file-has-ai">ИИ</span>' : ''}
                     <span class="tree-file-date">${escapeHtml(note.created_at || '')}</span>
+                    <button class="tree-file-del-btn" data-delete-id="${escapeHtml(note.id)}" data-delete-title="${escapeHtml(note.title)}" title="Удалить запись">
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                      </svg>
+                    </button>
                   </div>
                 </div>
               `).join('')}
@@ -1902,13 +2148,24 @@ document.addEventListener('DOMContentLoaded', () => {
         treeHtml += `
           <div class="tree-file-item" data-note-id="${escapeHtml(note.id)}">
             <div class="tree-file-left">
-              <span class="tree-file-icon">📄</span>
+              <span class="tree-file-icon">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                </svg>
+              </span>
               <span class="tree-file-title">${escapeHtml(note.title)}</span>
               <span class="tree-file-ext">.md</span>
             </div>
             <div class="tree-file-right">
-              ${note.ai_summary ? '<span class="tree-file-has-ai">⚡ ИИ</span>' : ''}
+              ${note.ai_summary ? '<span class="tree-file-has-ai">ИИ</span>' : ''}
               <span class="tree-file-date">${escapeHtml(note.created_at || '')}</span>
+              <button class="tree-file-del-btn" data-delete-id="${escapeHtml(note.id)}" data-delete-title="${escapeHtml(note.title)}" title="Удалить запись">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+              </button>
             </div>
           </div>
         `;
@@ -1939,9 +2196,20 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
 
+    // Delete buttons on file rows
+    el.vaultTreeContainer.querySelectorAll('.tree-file-del-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const noteId = btn.dataset.deleteId;
+        const noteTitle = btn.dataset.deleteTitle;
+        deleteNoteById(noteId, noteTitle);
+      });
+    });
+
     // File click -> Open Note Document Reader
     el.vaultTreeContainer.querySelectorAll('.tree-file-item').forEach(item => {
-      item.addEventListener('click', () => {
+      item.addEventListener('click', (e) => {
+        if (e.target.closest('.tree-file-del-btn')) return;
         const noteId = item.dataset.noteId;
         const note = state.notes.find(n => n.id === noteId);
         if (note) openNoteReader(note);
@@ -1997,6 +2265,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // 2. Note Document Reader Modal
+  function closeNoteReader() {
+    if (el.noteReaderModal) el.noteReaderModal.style.display = 'none';
+    popModal(el.noteReaderModal);
+  }
+
   function openNoteReader(note) {
     const meta = resolveCategoryMeta(note.para_category);
     el.readerCrumbFolder.textContent = meta.label;
@@ -2005,8 +2278,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     el.readerMetaRow.innerHTML = `
       <span class="reader-para-badge">${escapeHtml(meta.label)}</span>
-      <span class="tree-file-date">📅 ${escapeHtml(note.created_at || '')}</span>
-      <span class="tree-file-date">📝 ${note.clean_text.split(/\s+/).length} слов</span>
+      <span class="tree-file-date">${escapeHtml(note.created_at || '')}</span>
+      <span class="tree-file-date">${note.clean_text.split(/\s+/).length} слов</span>
     `;
 
     if (note.ai_summary) {
@@ -2022,12 +2295,22 @@ document.addEventListener('DOMContentLoaded', () => {
       openPropertiesModal(note.id);
     };
 
+    if (el.btnReaderDelete) {
+      el.btnReaderDelete.onclick = () => {
+        deleteNoteById(note.id, note.title);
+      };
+    }
+
     el.noteReaderModal.style.display = 'flex';
+    pushModal(el.noteReaderModal, closeNoteReader);
   }
 
-  el.btnCloseReaderModal.addEventListener('click', () => {
-    el.noteReaderModal.style.display = 'none';
-  });
+  el.btnCloseReaderModal.addEventListener('click', closeNoteReader);
+
+  function closePropertiesModal() {
+    if (el.notePropertiesModal) el.notePropertiesModal.style.display = 'none';
+    popModal(el.notePropertiesModal);
+  }
 
   async function openPropertiesModal(noteId) {
     try {
@@ -2044,25 +2327,29 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="prop-row"><span class="prop-label">Сущности</span><span class="prop-val">${p.entities.join(', ') || 'нет'}</span></div>
         `;
         el.notePropertiesModal.style.display = 'flex';
+        pushModal(el.notePropertiesModal, closePropertiesModal);
       }
     } catch (e) {
       console.error('Failed to load properties:', e);
     }
   }
 
-  el.btnClosePropertiesModal.addEventListener('click', () => {
-    el.notePropertiesModal.style.display = 'none';
-  });
+  el.btnClosePropertiesModal.addEventListener('click', closePropertiesModal);
 
   // ── 13. FAB Action Sheet & Modal Navigation ───────────────────────────────
-  el.fabAddBtn.addEventListener('click', () => {
+  function openAddModal() {
     el.addContentModal.style.display = 'flex';
     renderDownloadQueue();
-  });
+    pushModal(el.addContentModal, closeAddModal);
+  }
 
-  el.btnCloseAddModal.addEventListener('click', () => {
+  function closeAddModal() {
     el.addContentModal.style.display = 'none';
-  });
+    popModal(el.addContentModal);
+  }
+
+  el.fabAddBtn.addEventListener('click', openAddModal);
+  el.btnCloseAddModal.addEventListener('click', closeAddModal);
 
   el.sheetTabs.forEach(tab => {
     tab.addEventListener('click', () => {
@@ -2176,10 +2463,10 @@ document.addEventListener('DOMContentLoaded', () => {
       if (tracksRes.ok) {
         const newTracks = await tracksRes.json();
         if (JSON.stringify(newTracks) !== JSON.stringify(state.tracks)) {
-          const playingTrack = state.tracks[state.currentTrackIndex];
           state.tracks = newTracks;
-          if (playingTrack) {
-            const newIdx = state.tracks.findIndex(t => t.id === playingTrack.id);
+          if (state.currentTrackId) {
+            const list = getFilteredTracks();
+            const newIdx = list.findIndex(t => t.id === state.currentTrackId);
             if (newIdx !== -1) state.currentTrackIndex = newIdx;
           }
           renderMusicTab();

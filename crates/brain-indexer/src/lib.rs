@@ -33,8 +33,6 @@ impl BrainIndexer {
 
         let index = if let Some(p) = path {
             std::fs::create_dir_all(p)?;
-            let _ = std::fs::remove_file(p.join(".tantivy-writer.lock"));
-            let _ = std::fs::remove_file(p.join(".tantivy-meta.lock"));
             Index::open_or_create(tantivy::directory::MmapDirectory::open(p)?, schema.clone())?
         } else {
             Index::create_in_ram(schema.clone())
@@ -45,7 +43,7 @@ impl BrainIndexer {
             .reload_policy(ReloadPolicy::OnCommitWithDelay)
             .try_into()?;
 
-        // Use 50MB of heap for index writer, with automatic stale lock recovery
+        // Use 50MB of heap for index writer, with graceful stale lock recovery
         let writer = match index.writer(50_000_000) {
             Ok(w) => w,
             Err(e) => {

@@ -78,7 +78,10 @@ impl Plugin for EnglishTutorPlugin {
                     });
                 }
 
-                let card = self.engine.get_random_card().unwrap();
+                let card = match self.engine.get_random_card() {
+                    Some(c) => c,
+                    None => return Ok(PluginResponse::Text("Vocabulary bank is empty.".to_string())),
+                };
                 let text = format!(
                     "🇬🇧 <b>English Flashcard</b>\n\n📖 <b>Word:</b> {} <i>{}</i>\n📊 <b>Level:</b> <code>{}</code>\n\n🇷🇺 <b>Translation:</b> {}\n\n💬 <b>Example:</b> {}\n<i>{}</i>",
                     escape_html(&card.word),
@@ -130,7 +133,10 @@ impl Plugin for EnglishTutorPlugin {
     async fn handle_callback(&self, callback_data: &str, _user_id: u64) -> Result<PluginResponse> {
         if let Some(rest) = callback_data.strip_prefix("eng:") {
             if rest == "next" {
-                let card = self.engine.get_random_card().unwrap();
+                let card = match self.engine.get_random_card() {
+                    Some(c) => c,
+                    None => return Ok(PluginResponse::Text("Vocabulary bank is empty.".to_string())),
+                };
                 let text = format!(
                     "🇬🇧 *English Flashcard*\n\n📖 *Word:* {} {}\n📊 *Level:* `{}`\n\n🇷🇺 *Translation:* {}\n\n💬 *Example:* {}\n_{}_",
                     card.word, card.phonetic, card.level, card.translation_ru, card.example_en, card.example_ru

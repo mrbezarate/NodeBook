@@ -25,7 +25,8 @@ impl VaultParaRouter {
             .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' { c } else { '_' })
             .collect();
         let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M");
-        self.vault_root.join(para_folder).join(area.to_string()).join(format!("{}_{}_{}.md", timestamp, safe_title.trim(), &entry_id[0..6.min(entry_id.len())]))
+        let id_prefix: String = entry_id.chars().take(6).collect();
+        self.vault_root.join(para_folder).join(area.to_string()).join(format!("{}_{}_{}.md", timestamp, safe_title.trim(), id_prefix))
     }
 }
 

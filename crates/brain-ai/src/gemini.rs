@@ -169,15 +169,15 @@ impl GeminiProvider {
             model: model.into(),
             embedding_model: embedding_model.into(),
             is_enterprise,
-            project_id: "568759207413".to_string(),
-            location: "us-central1".to_string(),
+            project_id: std::env::var("GEMINI_PROJECT_ID").unwrap_or_default(),
+            location: std::env::var("GEMINI_LOCATION").unwrap_or_else(|_| "us-central1".to_string()),
         }
     }
 
     async fn send_vertex_generate(&self, prompt: &str, is_json: bool, temperature: f32) -> Result<String> {
         let endpoint = format!(
-            "https://{}-aiplatform.googleapis.com/v1/projects/{}/locations/{}/publishers/google/models/{}:generateContent?key={}",
-            self.location, self.project_id, self.location, self.model, self.api_key
+            "https://{}-aiplatform.googleapis.com/v1/projects/{}/locations/{}/publishers/google/models/{}:generateContent",
+            self.location, self.project_id, self.location, self.model
         );
 
         let req = VertexGenerateRequest {
@@ -191,8 +191,12 @@ impl GeminiProvider {
             },
         };
 
-        let resp = self.client.post(&endpoint)
-            .json(&req)
+        let mut builder = self.client.post(&endpoint).json(&req);
+        if !self.api_key.is_empty() {
+            builder = builder.header("x-goog-api-key", &self.api_key);
+        }
+
+        let resp = builder
             .send()
             .await
             .map_err(|e| BrainError::Ai(e.to_string()))?;
@@ -311,16 +315,20 @@ impl EmbeddingProvider for GeminiProvider {
     async fn embed(&self, text: &str) -> Result<Vec<f32>> {
         if self.is_enterprise {
             let endpoint = format!(
-                "https://{}-aiplatform.googleapis.com/v1/projects/{}/locations/{}/publishers/google/models/{}:predict?key={}",
-                self.location, self.project_id, self.location, self.embedding_model, self.api_key
+                "https://{}-aiplatform.googleapis.com/v1/projects/{}/locations/{}/publishers/google/models/{}:predict",
+                self.location, self.project_id, self.location, self.embedding_model
             );
 
             let req = VertexEmbedRequest {
                 instances: vec![VertexEmbedInstance { content: text }],
             };
 
-            let resp = self.client.post(&endpoint)
-                .json(&req)
+            let mut builder = self.client.post(&endpoint).json(&req);
+            if !self.api_key.is_empty() {
+                builder = builder.header("x-goog-api-key", &self.api_key);
+            }
+
+            let resp = builder
                 .send()
                 .await
                 .map_err(|e| BrainError::Ai(e.to_string()))?;

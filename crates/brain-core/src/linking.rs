@@ -74,35 +74,59 @@ pub fn auto_link(text: &str, docs: &[LinkCandidate]) -> String {
 }
 
 fn find_safe_match(text: &str, alias: &str) -> Option<(usize, usize)> {
-    let lower_text = text.to_lowercase();
-    let lower_alias = alias.to_lowercase();
-    
-    let mut start_idx = 0;
-    while let Some(idx) = lower_text[start_idx..].find(&lower_alias) {
-        let abs_idx = start_idx + idx;
-        let end_idx = abs_idx + lower_alias.len();
+    let alias_chars: Vec<char> = alias.chars().flat_map(|c| c.to_lowercase()).collect();
+    if alias_chars.is_empty() {
+        return None;
+    }
 
-        if is_safe_context(text, abs_idx) {
-            let is_start_boundary = text.get(..abs_idx)
-                .and_then(|s| s.chars().next_back())
-                .map(|c| !c.is_alphanumeric())
-                .unwrap_or(true);
+    let text_chars: Vec<(usize, char)> = text.char_indices().collect();
+    if text_chars.is_empty() {
+        return None;
+    }
 
-            let is_end_boundary = text.get(end_idx..)
-                .and_then(|s| s.chars().next())
-                .map(|c| !c.is_alphanumeric())
-                .unwrap_or(true);
-            
-            if is_start_boundary && is_end_boundary {
-                return Some((abs_idx, end_idx));
+    for (start_idx, &(byte_start, _)) in text_chars.iter().enumerate() {
+        if !is_safe_context(text, byte_start) {
+            continue;
+        }
+
+        // Check start boundary: previous char must not be alphanumeric
+        if start_idx > 0 && text_chars[start_idx - 1].1.is_alphanumeric() {
+            continue;
+        }
+
+        let mut matched = true;
+        let mut curr_idx = start_idx;
+
+        for &ac in &alias_chars {
+            if curr_idx >= text_chars.len() {
+                matched = false;
+                break;
+            }
+            let tc_low: Vec<char> = text_chars[curr_idx].1.to_lowercase().collect();
+            if tc_low == vec![ac] {
+                curr_idx += 1;
+            } else {
+                matched = false;
+                break;
             }
         }
 
-        // Advance start_idx to the next char boundary safely
-        if let Some((next_char_offset, _)) = lower_text[abs_idx..].char_indices().nth(1) {
-            start_idx = abs_idx + next_char_offset;
-        } else {
-            break;
+        if matched {
+            // Check end boundary: next char (if any) must not be alphanumeric
+            let is_end_boundary = if curr_idx < text_chars.len() {
+                !text_chars[curr_idx].1.is_alphanumeric()
+            } else {
+                true
+            };
+
+            if is_end_boundary {
+                let byte_end = if curr_idx < text_chars.len() {
+                    text_chars[curr_idx].0
+                } else {
+                    text.len()
+                };
+                return Some((byte_start, byte_end));
+            }
         }
     }
     None

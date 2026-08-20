@@ -44,7 +44,7 @@ async fn setup_scheduler(
 
     let review_time = config.diary.evening_review_time.clone();
     let parts: Vec<&str> = review_time.split(':').collect();
-    let local_hour: i32 = parts.get(0).and_then(|h| h.parse().ok()).unwrap_or(22);
+    let local_hour: i32 = parts.first().and_then(|h| h.parse().ok()).unwrap_or(22);
     let minute = parts.get(1).unwrap_or(&"00");
     
     let offset = get_timezone_offset_hours(&config.diary.timezone);
@@ -93,6 +93,32 @@ async fn setup_scheduler(
     Ok(sched)
 }
 
+#[cfg(unix)]
+struct SingleInstanceGuard {
+    _file: std::fs::File,
+}
+
+#[cfg(unix)]
+impl SingleInstanceGuard {
+    fn acquire(lock_path: &str) -> anyhow::Result<Self> {
+        use std::os::unix::io::AsRawFd;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(lock_path)?;
+        
+        let fd = file.as_raw_fd();
+        let ret = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+        if ret != 0 {
+            anyhow::bail!("Another instance of brain-telegram-bot is already running (locked {})", lock_path);
+        }
+        
+        Ok(Self { _file: file })
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -101,6 +127,15 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("🧠 Brain — Personal Knowledge OS starting...");
     dotenvy::dotenv().ok();
+    
+    #[cfg(unix)]
+    let _instance_guard = match SingleInstanceGuard::acquire("/tmp/nodebook_bot.lock") {
+        Ok(g) => g,
+        Err(e) => {
+            tracing::error!("⛔ {}", e);
+            std::process::exit(0);
+        }
+    };
     
     let mut config = brain_config::BrainConfig::load_or_default();
     if let Ok(token) = std::env::var("BOT_TOKEN") { config.telegram.bot_token = token; }
@@ -115,7 +150,7 @@ async fn main() -> anyhow::Result<()> {
     let registry = brain_vault::VaultRegistry::load_or_create(&registry_file, &config.vault.path);
     config.vault.path = registry.get_active_path();
     let vault_registry = Arc::new(tokio::sync::RwLock::new(registry));
-    let (ai_provider, embeddings, heavy_ai_provider): (Arc<dyn AiProvider>, Arc<dyn EmbeddingProvider>, Arc<dyn AiProvider>) = match config.ai.provider.as_str() {
+    let (_ai_provider, embeddings, heavy_ai_provider): (Arc<dyn AiProvider>, Arc<dyn EmbeddingProvider>, Arc<dyn AiProvider>) = match config.ai.provider.as_str() {
         "gemini" => {
             let api_key = std::env::var("GEMINI_API_KEY").unwrap_or_else(|_| config.ai.gemini.api_key.clone());
             let provider = Arc::new(brain_ai::gemini::GeminiProvider::new(
@@ -187,9 +222,8 @@ async fn main() -> anyhow::Result<()> {
     ));
 
     let entity_validator: Arc<dyn brain_core::traits::EntityValidator> = semantic_validator.clone();
-    let identity_resolver: Arc<dyn brain_core::traits::IdentityResolver> = semantic_validator.clone();
     
-    let vault_store = Arc::new(brain_vault::EntityVault::new(config.vault.path.clone()));
+    let _vault_store = Arc::new(brain_vault::EntityVault::new(config.vault.path.clone()));
     let db_path = std::path::PathBuf::from(&config.vault.path).join("brain.db");
     let knowledge_store = Arc::new(brain_core::db::SqliteKnowledgeStore::new(db_path.to_str().unwrap())?);
 
@@ -239,7 +273,7 @@ async fn main() -> anyhow::Result<()> {
         .context_manager(context_manager)
         .entity_validator(entity_validator)
         .identity_resolver(identity_resolver)
-        .with_knowledge_store(vault_store)
+        .with_knowledge_store(knowledge_store.clone())
         .with_raw_event_store(knowledge_store.clone())
         .build()?;
 
@@ -386,7 +420,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
 
                                 if let Some(msg_id) = processing_msg_id {
-                                    let res = bot_clone.edit_message_text(chat_id, teloxide::types::MessageId(msg_id as i32), &reply)
+                                    let res = bot_clone.edit_message_text(chat_id, teloxide::types::MessageId(msg_id), &reply)
                                         .parse_mode(teloxide::types::ParseMode::Html)
                                         .await;
                                     if res.is_err() {

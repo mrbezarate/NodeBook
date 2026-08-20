@@ -81,7 +81,14 @@ impl VaultStorage for ObsidianVault {
     }
 
     async fn delete_entry(&self, file_path: &str) -> Result<()> {
-        tokio::fs::remove_file(file_path).await.map_err(|e| BrainError::Vault(e.to_string()))?;
+        let path = if std::path::Path::new(file_path).is_absolute() {
+            std::path::PathBuf::from(file_path)
+        } else {
+            self.root.join(file_path)
+        };
+        if path.exists() {
+            tokio::fs::remove_file(path).await.map_err(|e| BrainError::Vault(e.to_string()))?;
+        }
         Ok(())
     }
 

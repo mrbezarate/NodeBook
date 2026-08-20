@@ -1453,6 +1453,29 @@ body {
   font-weight: 700;
 }
 
+.tree-file-del-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0.5;
+  transition: all var(--transition-fast);
+  padding: 0;
+  margin-left: 4px;
+}
+
+.tree-file-del-btn:hover {
+  opacity: 1;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.15);
+}
+
 /* ── Note Document Reader Modal ───────────────────────────────────────────── */
 
 .note-reader-sheet {
@@ -2529,6 +2552,21 @@ body {
   font-size: 13px;
   font-weight: 700;
   color: #10b981;
+}
+
+.track-artists-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.track-artist-sep {
+  font-size: 11px;
+  color: var(--text-muted);
+  user-select: none;
+  margin-right: 2px;
 }
 
 .track-artist-badge {

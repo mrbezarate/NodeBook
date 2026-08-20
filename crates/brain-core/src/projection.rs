@@ -3,7 +3,6 @@ use brain_common::{Area, Entity, EntityType, Result};
 use std::sync::Arc;
 use crate::traits::{ProjectionEngine, Renderer, RawEventStore};
 use crate::extractor::StructuredObservation;
-use std::fs;
 use std::path::PathBuf;
 
 pub struct SimpleProjectionEngine {
@@ -76,25 +75,36 @@ pub struct ObsidianRenderer {
 #[async_trait]
 impl Renderer for ObsidianRenderer {
     async fn render(&self, entity: &Entity) -> Result<()> {
-        let file_name = format!("{}.md", entity.name);
+        let safe_name: String = entity.name
+            .chars()
+            .map(|c| if c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|' { '_' } else { c })
+            .collect();
+        let safe_name = if safe_name.trim().is_empty() { format!("entity_{}", entity.id) } else { safe_name.trim().to_string() };
+        let file_name = format!("{}.md", safe_name);
         let path = self.base_path.join(&file_name);
         
+        let area_str = entity.area.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "none".to_string());
+        let type_str = format!("{:?}", entity.entity_type);
+
         let md = format!(
             "---\n\
              id: {}\n\
-             type: {:?}\n\
-             area: {:?}\n\
+             type: {}\n\
+             area: {}\n\
              ---\n\
              # {}\n\n\
              {}\n\n",
             entity.id,
-            entity.entity_type,
-            entity.area,
+            type_str,
+            area_str,
             entity.name,
             entity.summary
         );
         
-        fs::write(&path, md).map_err(|e| brain_common::BrainError::Io(e))?;
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(brain_common::BrainError::Io)?;
+        }
+        tokio::fs::write(&path, md).await.map_err(brain_common::BrainError::Io)?;
         tracing::info!("Rendered to Obsidian: {:?}", path);
         Ok(())
     }

@@ -9,19 +9,37 @@ fn with_retry<F, T>(mut f: F) -> Result<T>
 where
     F: FnMut() -> std::result::Result<T, rusqlite::Error>,
 {
-    let mut retries = 3;
+    let mut retries = 5;
+    let mut backoff = std::time::Duration::from_millis(25);
     loop {
         match f() {
             Ok(v) => return Ok(v),
             Err(e) => {
-                if retries == 0 {
+                let is_busy = match e {
+                    rusqlite::Error::SqliteFailure(ref err, _) => {
+                        err.extended_code == 5 || err.extended_code == 261 // SQLITE_BUSY / SQLITE_BUSY_RECOVERY
+                    }
+                    _ => false,
+                };
+                if retries == 0 || !is_busy {
                     return Err(BrainError::Database(e.to_string()));
                 }
                 retries -= 1;
-                std::thread::sleep(std::time::Duration::from_millis(50));
+                std::thread::sleep(backoff);
+                backoff = backoff.saturating_mul(2);
             }
         }
     }
+}
+
+pub(crate) fn parse_sqlite_datetime(s: &str) -> std::result::Result<chrono::DateTime<chrono::Utc>, rusqlite::Error> {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+        return Ok(dt.with_timezone(&chrono::Utc));
+    }
+    if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
+        return Ok(chrono::DateTime::from_naive_utc_and_offset(naive, chrono::Utc));
+    }
+    Err(rusqlite::Error::InvalidQuery)
 }
 
 pub struct SqliteKnowledgeStore {
@@ -32,8 +50,13 @@ impl SqliteKnowledgeStore {
     pub fn new(db_path: &str) -> Result<Self> {
         let conn = Connection::open(db_path).map_err(|e| BrainError::Database(e.to_string()))?;
         
-        // Включаем внешние ключи (Foreign Keys)
-        conn.execute("PRAGMA foreign_keys = ON;", []).map_err(|e| BrainError::Database(e.to_string()))?;
+        // Включаем WAL режим, busy_timeout и внешние ключи (Foreign Keys)
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA busy_timeout = 5000;
+             PRAGMA foreign_keys = ON;"
+        ).map_err(|e| BrainError::Database(e.to_string()))?;
         
         // 1. Создаем нормализованную схему
         conn.execute_batch(
@@ -49,6 +72,7 @@ impl SqliteKnowledgeStore {
                 projected INTEGER DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_audit_aggregate ON audit_events(aggregate_id);
+            CREATE INDEX IF NOT EXISTS idx_audit_events_unprocessed ON audit_events(event_type, processed, created_at);
 
             CREATE TABLE IF NOT EXISTS brain_entries (
                 id TEXT PRIMARY KEY,
@@ -290,41 +314,148 @@ impl KnowledgeStore for SqliteKnowledgeStore {
     }
 
     async fn list_entities(&self, filter_type: Option<EntityType>) -> Result<Vec<Entity>> {
-        let ids = {
-            let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
-            let mut result_ids = Vec::new();
-            
-            let mut query = "SELECT id FROM entities".to_string();
-            if let Some(t) = &filter_type {
-                let t_str = format!("{:?}", t);
-                query.push_str(" WHERE entity_type = ?1");
-                let mut stmt = conn.prepare(&query).map_err(|e| BrainError::Database(e.to_string()))?;
-                let rows = stmt.query_map(params![t_str], |r| r.get::<_, String>(0)).map_err(|e| BrainError::Database(e.to_string()))?;
-                for row in rows {
-                    if let Ok(id) = row {
-                        result_ids.push(id);
-                    }
-                }
-            } else {
-                let mut stmt = conn.prepare(&query).map_err(|e| BrainError::Database(e.to_string()))?;
-                let rows = stmt.query_map([], |r| r.get::<_, String>(0)).map_err(|e| BrainError::Database(e.to_string()))?;
-                for row in rows {
-                    if let Ok(id) = row {
-                        result_ids.push(id);
-                    }
-                }
-            }
-            result_ids
-        };
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
         
-        let mut entities = Vec::new();
-        for id in ids {
-            if let Ok(Some(e)) = self.get_entity(&id).await {
-                entities.push(e);
+        let mut query = "SELECT id, name, entity_type, area, summary FROM entities".to_string();
+        let base_entities: Vec<Entity> = if let Some(t) = &filter_type {
+            let t_str = format!("{:?}", t);
+            query.push_str(" WHERE entity_type = ?1");
+            let mut stmt = conn.prepare(&query).map_err(|e| BrainError::Database(e.to_string()))?;
+            let rows = stmt.query_map(params![t_str], |row| {
+                let id: String = row.get(0)?;
+                let name: String = row.get(1)?;
+                let entity_type_str: String = row.get(2)?;
+                let area_str: Option<String> = row.get(3)?;
+                let summary: String = row.get(4)?;
+                
+                let entity_type = match entity_type_str.as_str() {
+                    "Project" => EntityType::Project,
+                    "Person" => EntityType::Person,
+                    "Technology" => EntityType::Technology,
+                    _ => EntityType::Concept,
+                };
+                
+                let mut entity = Entity::new(&name, entity_type);
+                entity.id = id;
+                entity.summary = summary;
+                if let Some(area_s) = area_str {
+                    entity.area = serde_json::from_str(&format!("\"{}\"", area_s)).ok();
+                }
+                Ok(entity)
+            }).map_err(|e| BrainError::Database(e.to_string()))?;
+            rows.filter_map(std::result::Result::ok).collect()
+        } else {
+            let mut stmt = conn.prepare(&query).map_err(|e| BrainError::Database(e.to_string()))?;
+            let rows = stmt.query_map([], |row| {
+                let id: String = row.get(0)?;
+                let name: String = row.get(1)?;
+                let entity_type_str: String = row.get(2)?;
+                let area_str: Option<String> = row.get(3)?;
+                let summary: String = row.get(4)?;
+                
+                let entity_type = match entity_type_str.as_str() {
+                    "Project" => EntityType::Project,
+                    "Person" => EntityType::Person,
+                    "Technology" => EntityType::Technology,
+                    _ => EntityType::Concept,
+                };
+                
+                let mut entity = Entity::new(&name, entity_type);
+                entity.id = id;
+                entity.summary = summary;
+                if let Some(area_s) = area_str {
+                    entity.area = serde_json::from_str(&format!("\"{}\"", area_s)).ok();
+                }
+                Ok(entity)
+            }).map_err(|e| BrainError::Database(e.to_string()))?;
+            rows.filter_map(std::result::Result::ok).collect()
+        };
+
+        if base_entities.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        use std::collections::HashMap;
+        let mut entity_map: HashMap<String, Entity> = base_entities.into_iter().map(|e| (e.id.clone(), e)).collect();
+
+        // Batch load tags for matching entities
+        let entity_ids: Vec<String> = entity_map.keys().cloned().collect();
+        let placeholders = entity_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+
+        let tags_sql = format!("SELECT entity_id, tag FROM tags WHERE entity_id IN ({})", placeholders);
+        if let Ok(mut stmt) = conn.prepare(&tags_sql) {
+            let params_vec = entity_ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect::<Vec<_>>();
+            if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params_vec), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            }) {
+                for (eid, tag) in rows.flatten() {
+                    if let Some(e) = entity_map.get_mut(&eid) {
+                        e.tags.push(tag);
+                    }
+                }
             }
         }
-        
-        Ok(entities)
+
+        // Batch load aliases for matching entities
+        let aliases_sql = format!("SELECT entity_id, alias FROM aliases WHERE entity_id IN ({})", placeholders);
+        if let Ok(mut stmt) = conn.prepare(&aliases_sql) {
+            let params_vec = entity_ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect::<Vec<_>>();
+            if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params_vec), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            }) {
+                for (eid, alias) in rows.flatten() {
+                    if let Some(e) = entity_map.get_mut(&eid) {
+                        e.aliases.push(alias);
+                    }
+                }
+            }
+        }
+
+        // Batch load relations for matching entities
+        let rels_sql = format!("SELECT from_entity, relation, to_entity FROM relations WHERE from_entity IN ({})", placeholders);
+        if let Ok(mut stmt) = conn.prepare(&rels_sql) {
+            let params_vec = entity_ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect::<Vec<_>>();
+            if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params_vec), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+            }) {
+                for (from_eid, relation, target) in rows.flatten() {
+                    if let Some(e) = entity_map.get_mut(&from_eid) {
+                        e.links.push(SemanticLink { relation, target });
+                    }
+                }
+            }
+        }
+
+        // Batch load sources for matching entities
+        let src_sql = format!("SELECT entity_id, source_json FROM sources WHERE entity_id IN ({})", placeholders);
+        if let Ok(mut stmt) = conn.prepare(&src_sql) {
+            let params_vec = entity_ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect::<Vec<_>>();
+            if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params_vec), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            }) {
+                for (eid, src_json) in rows.flatten() {
+                    if let Ok(src) = serde_json::from_str::<EntrySource>(&src_json) {
+                        if let Some(e) = entity_map.get_mut(&eid) {
+                            e.sources.push(src);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(entity_map.into_values().collect())
+    }
+
+    async fn delete_entity(&self, id: &str) -> Result<()> {
+        let mut conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
+        let tx = conn.transaction().map_err(|e| BrainError::Database(e.to_string()))?;
+        tx.execute("DELETE FROM tags WHERE entity_id = ?1", params![id]).map_err(|e| BrainError::Database(e.to_string()))?;
+        tx.execute("DELETE FROM aliases WHERE entity_id = ?1", params![id]).map_err(|e| BrainError::Database(e.to_string()))?;
+        tx.execute("DELETE FROM relations WHERE from_entity = ?1 OR to_entity = ?1", params![id]).map_err(|e| BrainError::Database(e.to_string()))?;
+        tx.execute("DELETE FROM sources WHERE entity_id = ?1", params![id]).map_err(|e| BrainError::Database(e.to_string()))?;
+        tx.execute("DELETE FROM entities WHERE id = ?1", params![id]).map_err(|e| BrainError::Database(e.to_string()))?;
+        tx.commit().map_err(|e| BrainError::Database(e.to_string()))?;
+        Ok(())
     }
 }
 
@@ -429,7 +560,21 @@ impl RawEventStore for SqliteKnowledgeStore {
                 status: row.get(6)?,
             })
         }).optional().map_err(|e| BrainError::Database(e.to_string()))?;
+        
         Ok(event)
+    }
+
+    async fn delete_raw_event(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
+        with_retry(|| {
+            conn.execute("DELETE FROM raw_events WHERE id = ?1", params![id])?;
+            conn.execute("DELETE FROM audit_events WHERE aggregate_id = ?1", params![id])?;
+            conn.execute("DELETE FROM observations WHERE raw_event_id = ?1", params![id])?;
+            conn.execute("DELETE FROM brain_entries WHERE id = ?1", params![id])?;
+            conn.execute("DELETE FROM links WHERE from_id = ?1 OR to_id = ?1", params![id])?;
+            Ok(())
+        })?;
+        Ok(())
     }
 
     async fn save_observation(&self, observation: &Observation) -> Result<()> {
@@ -728,7 +873,7 @@ impl RawEventStore for SqliteKnowledgeStore {
             let created_at: String = row.get(3)?;
             
             let event: brain_common::SourcingEvent = serde_json::from_str(&payload).map_err(|_| rusqlite::Error::InvalidQuery)?;
-            let date_time = chrono::DateTime::parse_from_rfc3339(&created_at).map_err(|_| rusqlite::Error::InvalidQuery)?.with_timezone(&chrono::Utc);
+            let date_time = parse_sqlite_datetime(&created_at)?;
             
             Ok(brain_common::SourcingEventRecord { id, aggregate_id: agg_id, event, created_at: date_time })
         }).map_err(|e| BrainError::Database(e.to_string()))?;
@@ -752,7 +897,7 @@ impl RawEventStore for SqliteKnowledgeStore {
             let created_at: String = row.get(3)?;
             
             let event: brain_common::SourcingEvent = serde_json::from_str(&payload).map_err(|_| rusqlite::Error::InvalidQuery)?;
-            let date_time = chrono::DateTime::parse_from_rfc3339(&created_at).map_err(|_| rusqlite::Error::InvalidQuery)?.with_timezone(&chrono::Utc);
+            let date_time = parse_sqlite_datetime(&created_at)?;
             
             Ok(brain_common::SourcingEventRecord { id, aggregate_id: agg_id, event, created_at: date_time })
         }).optional().map_err(|e| BrainError::Database(e.to_string()))?;
@@ -786,7 +931,7 @@ impl RawEventStore for SqliteKnowledgeStore {
             let payload: String = row.get(2)?;
             let created_at: String = row.get(3)?;
             let event: brain_common::SourcingEvent = serde_json::from_str(&payload).map_err(|_| rusqlite::Error::InvalidQuery)?;
-            let date_time = chrono::DateTime::parse_from_rfc3339(&created_at).map_err(|_| rusqlite::Error::InvalidQuery)?.with_timezone(&chrono::Utc);
+            let date_time = parse_sqlite_datetime(&created_at)?;
             Ok(brain_common::SourcingEventRecord { id, aggregate_id: agg_id, event, created_at: date_time })
         }).optional().map_err(|e| BrainError::Database(e.to_string()))?;
         
@@ -817,7 +962,7 @@ impl RawEventStore for SqliteKnowledgeStore {
             let created_at: String = row.get(6)?;
             
             let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
-            let date_time = chrono::DateTime::parse_from_rfc3339(&created_at).map_err(|_| rusqlite::Error::InvalidQuery)?.with_timezone(&chrono::Utc);
+            let date_time = parse_sqlite_datetime(&created_at)?;
             
             Ok(brain_common::ProjectionEntry {
                 id,
@@ -844,6 +989,16 @@ impl RawEventStore for SqliteKnowledgeStore {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 rusqlite::params![entry.id, entry.title, entry.raw, entry.summary, tags_str, is_fallback_int],
             )
+        })?;
+        Ok(())
+    }
+
+    async fn delete_projection(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| BrainError::Database(format!("Lock error: {}", e)))?;
+        with_retry(|| {
+            conn.execute("DELETE FROM brain_entries WHERE id = ?1", rusqlite::params![id])?;
+            conn.execute("DELETE FROM links WHERE from_id = ?1 OR to_id = ?1", rusqlite::params![id])?;
+            Ok(())
         })?;
         Ok(())
     }

@@ -33,8 +33,10 @@ pub async fn send_plugin_response(
                         for (i, path_str) in chunk.iter().enumerate() {
                             let input_file = InputFile::file(std::path::Path::new(path_str));
                             let mut photo = teloxide::types::InputMediaPhoto::new(input_file);
-                            if chunk_idx == 0 && i == 0 && caption.is_some() {
-                                photo = photo.caption(caption.as_ref().unwrap().clone());
+                            if chunk_idx == 0 && i == 0 {
+                                if let Some(ref cap) = caption {
+                                    photo = photo.caption(cap.clone());
+                                }
                             }
                             media_group.push(teloxide::types::InputMedia::Photo(photo));
                         }

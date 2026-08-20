@@ -66,11 +66,17 @@ impl PluginRegistry {
     }
 
     pub async fn dispatch_command(&self, cmd: &PluginCommand) -> Result<Option<PluginResponse>> {
-        let plugins = self.plugins.read().await;
-        for (id, plugin) in plugins.iter() {
-            if !self.is_enabled(id).await {
-                continue;
-            }
+        let active_plugins: Vec<(String, SharedPlugin)> = {
+            let plugins = self.plugins.read().await;
+            let enabled = self.enabled.read().await;
+            plugins
+                .iter()
+                .filter(|(id, _)| *enabled.get(*id).unwrap_or(&false))
+                .map(|(id, p)| (id.clone(), p.clone()))
+                .collect()
+        };
+
+        for (id, plugin) in active_plugins {
             match plugin.handle_command(cmd).await {
                 Ok(PluginResponse::Ignored) => continue,
                 Ok(resp) => return Ok(Some(resp)),
@@ -83,11 +89,17 @@ impl PluginRegistry {
     }
 
     pub async fn dispatch_message(&self, msg: &PluginMessage) -> Result<Option<PluginResponse>> {
-        let plugins = self.plugins.read().await;
-        for (id, plugin) in plugins.iter() {
-            if !self.is_enabled(id).await {
-                continue;
-            }
+        let active_plugins: Vec<(String, SharedPlugin)> = {
+            let plugins = self.plugins.read().await;
+            let enabled = self.enabled.read().await;
+            plugins
+                .iter()
+                .filter(|(id, _)| *enabled.get(*id).unwrap_or(&false))
+                .map(|(id, p)| (id.clone(), p.clone()))
+                .collect()
+        };
+
+        for (id, plugin) in active_plugins {
             match plugin.handle_message(msg).await {
                 Ok(PluginResponse::Ignored) => continue,
                 Ok(resp) => return Ok(Some(resp)),

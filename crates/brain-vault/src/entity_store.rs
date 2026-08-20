@@ -12,8 +12,22 @@ impl EntityVault {
         Self { root: root.into() }
     }
 
+    fn sanitize_id(id: &str) -> String {
+        let safe: String = id
+            .chars()
+            .map(|c| if c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|' || c == '\0' { '_' } else { c })
+            .collect();
+        let safe = safe.trim_matches('.').trim().to_string();
+        if safe.is_empty() {
+            "unnamed_entity".to_string()
+        } else {
+            safe
+        }
+    }
+
     fn entity_path(&self, id: &str) -> PathBuf {
-        self.root.join("Entities").join(format!("{}.md", id))
+        let safe = Self::sanitize_id(id);
+        self.root.join("Entities").join(format!("{}.md", safe))
     }
 }
 
@@ -94,7 +108,7 @@ impl KnowledgeStore for EntityVault {
         if !entity.sources.is_empty() {
             md.push_str("## Timeline\n\n");
             for source in &entity.sources {
-                let date = chrono::Utc::now().format("%Y-%m-%d").to_string(); // In reality, source should have a date
+                let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
                 md.push_str(&format!("{}\nИзменено через: {:?}\n\n", date, source));
             }
         }
@@ -112,8 +126,37 @@ impl KnowledgeStore for EntityVault {
         Ok(())
     }
 
-    async fn list_entities(&self, _filter_type: Option<EntityType>) -> Result<Vec<Entity>> {
-        // Stub implementation
-        Ok(vec![])
+    async fn list_entities(&self, filter_type: Option<EntityType>) -> Result<Vec<Entity>> {
+        let dir = self.root.join("Entities");
+        if !dir.exists() {
+            return Ok(vec![]);
+        }
+        let mut entities = Vec::new();
+        let mut entries = tokio::fs::read_dir(&dir).await.map_err(|e| BrainError::Vault(e.to_string()))?;
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("md") {
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    if let Ok(Some(entity)) = self.get_entity(stem).await {
+                        if let Some(ft) = &filter_type {
+                            if &entity.entity_type == ft {
+                                entities.push(entity);
+                            }
+                        } else {
+                            entities.push(entity);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(entities)
+    }
+
+    async fn delete_entity(&self, id: &str) -> Result<()> {
+        let path = self.entity_path(id);
+        if path.exists() {
+            tokio::fs::remove_file(&path).await.map_err(|e| BrainError::Vault(e.to_string()))?;
+        }
+        Ok(())
     }
 }

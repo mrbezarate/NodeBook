@@ -98,6 +98,7 @@ pub trait KnowledgeStore: Send + Sync {
     async fn get_entity(&self, id: &str) -> Result<Option<Entity>>;
     async fn save_entity(&self, entity: &Entity) -> Result<()>;
     async fn list_entities(&self, filter_type: Option<EntityType>) -> Result<Vec<Entity>>;
+    async fn delete_entity(&self, id: &str) -> Result<()>;
 }
 
 /// Сервис разрешения сущностей (Identity Resolver).
@@ -108,6 +109,7 @@ pub trait RawEventStore: Send + Sync {
     async fn get_next_pending_job(&self, job_type: &str) -> Result<Option<Job>>;
     async fn update_job_status(&self, job_id: &str, status: &str) -> Result<()>;
     async fn get_raw_event(&self, event_id: &str) -> Result<Option<RawEvent>>;
+    async fn delete_raw_event(&self, id: &str) -> Result<()>;
     async fn save_observation(&self, observation: &Observation) -> Result<()>;
     async fn get_observations(&self, entity_id: &str) -> Result<Vec<Observation>>;
     async fn get_debug_trace(&self, event_id: &str) -> Result<String>;
@@ -126,6 +128,7 @@ pub trait RawEventStore: Send + Sync {
     async fn mark_event_projected(&self, event_id: &str) -> Result<()>;
     async fn load_projection(&self, id: &str) -> Result<Option<brain_common::ProjectionEntry>>;
     async fn save_projection(&self, entry: &brain_common::ProjectionEntry) -> Result<()>;
+    async fn delete_projection(&self, id: &str) -> Result<()>;
     
     // Graph
     async fn find_by_tag(&self, tag: &str) -> Result<Vec<String>>;
@@ -183,6 +186,7 @@ pub trait VectorStorage: Send + Sync {
     async fn upsert(&self, entry_id: &str, vector: Vec<f32>) -> Result<()>;
     async fn search(&self, query_vector: &[f32], limit: usize) -> Result<Vec<(String, f32)>>;
     async fn get(&self, entry_id: &str) -> Result<Option<Vec<f32>>>;
+    async fn delete(&self, entry_id: &str) -> Result<()>;
     async fn save(&self) -> Result<()>;
 }
 

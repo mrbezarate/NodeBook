@@ -43,8 +43,10 @@ impl VectorStore {
             tokio::fs::create_dir_all(parent).await?;
         }
         let entries = self.entries.read().await;
-        let data = serde_json::to_string_pretty(&*entries)?;
-        tokio::fs::write(&self.save_path, data).await?;
+        let data = serde_json::to_string(&*entries)?;
+        let tmp_path = self.save_path.with_extension("tmp");
+        tokio::fs::write(&tmp_path, data).await?;
+        tokio::fs::rename(&tmp_path, &self.save_path).await?;
         Ok(())
     }
 
@@ -78,6 +80,11 @@ impl VectorStore {
         
         results.into_iter().take(limit).collect()
     }
+    /// Delete a vector entry from the store.
+    pub async fn delete(&self, entry_id: &str) {
+        let mut entries = self.entries.write().await;
+        entries.remove(entry_id);
+    }
 }
 
 use async_trait::async_trait;
@@ -97,6 +104,11 @@ impl VectorStorage for VectorStore {
     async fn get(&self, entry_id: &str) -> brain_common::Result<Option<Vec<f32>>> {
         let entries = self.entries.read().await;
         Ok(entries.get(entry_id).map(|e| e.vector.clone()))
+    }
+
+    async fn delete(&self, entry_id: &str) -> brain_common::Result<()> {
+        self.delete(entry_id).await;
+        Ok(())
     }
 
     async fn save(&self) -> brain_common::Result<()> {

@@ -3,7 +3,7 @@ use tempfile::tempdir;
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use brain_common::{BrainError, EntrySource, RawEvent, Job, Result, ResolutionResult, Entity, EntityType};
+use brain_common::{RawEvent, Job, Result, ResolutionResult, Entity, EntityType};
 use brain_core::db::SqliteKnowledgeStore;
 use brain_core::traits::{AiProvider, IdentityResolver, RawEventStore};
 use brain_core::projection::{SimpleProjectionEngine, ObsidianRenderer};
@@ -125,7 +125,7 @@ async fn test_full_vertical_slice() {
             
             // ✓ Markdown появился
             assert!(content.contains("type: Concept")); // From SimpleProjectionEngine
-            assert!(content.contains("area: Some(Life)")); 
+            assert!(content.contains("area: Life")); 
             assert!(content.contains("Project supports multiplayer")); // Summary
         }
     }

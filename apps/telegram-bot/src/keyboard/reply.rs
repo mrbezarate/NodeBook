@@ -2,6 +2,7 @@
 use teloxide::types::{KeyboardButton, KeyboardMarkup, WebAppInfo};
 
 /// Главное меню бота.
+#[allow(dead_code)]
 pub fn main_menu_keyboard() -> KeyboardMarkup {
     main_menu_keyboard_with_app(None)
 }

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum UserState {
     Idle,
     DiaryReview(EveningReview),

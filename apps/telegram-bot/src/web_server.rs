@@ -69,6 +69,8 @@ pub async fn start_web_server(state: AppState, port: u16) {
         .route("/api/media/{id}", delete(delete_media))
         // ── Knowledge Vault Viewer Endpoints ────────────────────────────────
         .route("/api/vault/notes", get(get_vault_notes))
+        .route("/api/vault/note/{id}", delete(delete_vault_note))
+        .route("/api/vault/notes/{id}", delete(delete_vault_note))
         .route("/api/vault/note/{id}/properties", get(get_note_properties))
         // ── Playlists Endpoints ─────────────────────────────────────────────
         .route("/api/playlists", get(get_playlists).post(create_playlist))
@@ -95,6 +97,17 @@ pub async fn start_web_server(state: AppState, port: u16) {
 }
 
 // ── Telegram Mini App Cryptographic Authentication ──────────────────────────
+
+fn constant_time_eq_hex(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (&x, &y) in a.as_bytes().iter().zip(b.as_bytes().iter()) {
+        diff |= x.to_ascii_lowercase() ^ y.to_ascii_lowercase();
+    }
+    diff == 0
+}
 
 pub fn authenticate_request(
     headers: &HeaderMap,
@@ -162,21 +175,28 @@ pub fn authenticate_request(
         }
     }
 
-    let mut user_id: Option<u64> = None;
-    for (k, v) in &params {
-        if k == "user" {
-            if let Ok(user_json) = serde_json::from_str::<serde_json::Value>(v) {
-                user_id = user_json.get("id").and_then(|id| id.as_u64());
-            }
-        }
-    }
-
-    // Direct token check for personal desktop browser bookmark (e.g. initData=desktop_5887915765_...)
-    if init_data.starts_with("desktop_") {
-        for &allowed_uid in allowed_users {
-            let expected_prefix = format!("desktop_{}", allowed_uid);
-            if init_data.starts_with(&expected_prefix) {
-                return Ok(allowed_uid);
+    // Cryptographic token or direct ID check for personal desktop browser bookmark (e.g. initData=desktop_<uid> or initData=desktop_<uid>_<signature>)
+    if let Some(rest) = init_data.strip_prefix("desktop_") {
+        let (uid_str, maybe_sig) = match rest.split_once('_') {
+            Some((u, s)) => (u, Some(s)),
+            None => (rest, None),
+        };
+        if let Ok(uid) = uid_str.parse::<u64>() {
+            if allowed_users.contains(&uid) {
+                if let Some(sig) = maybe_sig {
+                    let secret_key = hmac::Key::new(hmac::HMAC_SHA256, bot_token.as_bytes());
+                    let calculated_tag = hmac::sign(&secret_key, format!("desktop_{}", uid).as_bytes());
+                    let calculated_hex: String = calculated_tag
+                        .as_ref()
+                        .iter()
+                        .map(|b| format!("{:02x}", b))
+                        .collect();
+                    if constant_time_eq_hex(&calculated_hex, sig) {
+                        return Ok(uid);
+                    }
+                } else {
+                    return Ok(uid);
+                }
             }
         }
     }
@@ -210,13 +230,13 @@ pub fn authenticate_request(
         .map(|b| format!("{:02x}", b))
         .collect();
 
-    if calculated_hex.eq_ignore_ascii_case(&received_hash) {
+    if constant_time_eq_hex(&calculated_hex, &received_hash) {
         check_passed = true;
     }
 
     // 2. Try with raw values (standard Telegram Desktop format)
     if !check_passed {
-        raw_params.sort_by(|a, b| a.0.cmp(&b.0));
+        raw_params.sort_by(|a, b| a.0.cmp(b.0));
         let raw_check_string = raw_params
             .iter()
             .map(|(k, v)| format!("{}={}", k, v))
@@ -230,7 +250,7 @@ pub fn authenticate_request(
             .map(|b| format!("{:02x}", b))
             .collect();
 
-        if raw_calculated_hex.eq_ignore_ascii_case(&received_hash) {
+        if constant_time_eq_hex(&raw_calculated_hex, &received_hash) {
             check_passed = true;
         }
     }
@@ -343,6 +363,29 @@ async fn health_check() -> (StatusCode, &'static str) {
 
 // ── Music Player Handlers ───────────────────────────────────────────────────
 
+fn guess_media_mime(path: &StdPath, default_mime: &'static str) -> &'static str {
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        match ext.to_ascii_lowercase().as_str() {
+            "mp3" => "audio/mpeg",
+            "m4a" | "aac" => "audio/mp4",
+            "ogg" | "opus" => "audio/ogg",
+            "wav" => "audio/wav",
+            "flac" => "audio/flac",
+            "mp4" | "m4v" => "video/mp4",
+            "webm" => "video/webm",
+            "mov" => "video/quicktime",
+            "mkv" => "video/x-matroska",
+            "jpg" | "jpeg" => "image/jpeg",
+            "png" => "image/png",
+            "webp" => "image/webp",
+            "svg" => "image/svg+xml",
+            _ => default_mime,
+        }
+    } else {
+        default_mime
+    }
+}
+
 async fn get_audio_tracks(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -366,7 +409,8 @@ async fn stream_audio(
     let lib = state.downloader.get_library().await;
     if let Some(item) = lib.into_iter().find(|i| i.id == id) {
         let file_path = state.downloader.download_dir().join(&item.file_name);
-        return stream_file_with_range(file_path, "audio/mpeg", headers).await;
+        let mime = guess_media_mime(&file_path, "audio/mpeg");
+        return stream_file_with_range(file_path, mime, headers).await;
     }
     (StatusCode::NOT_FOUND, "Track not found").into_response()
 }
@@ -389,10 +433,11 @@ async fn stream_cover(
         if let Some(ref cover) = item.cover_file {
             let path = state.downloader.download_dir().join(cover);
             if path.exists() {
-                if let Ok(bytes) = tokio::fs::read(path).await {
+                if let Ok(bytes) = tokio::fs::read(&path).await {
+                    let mime = guess_media_mime(&path, "image/jpeg");
                     return (
                         StatusCode::OK,
-                        [(header::CONTENT_TYPE, "image/jpeg")],
+                        [(header::CONTENT_TYPE, mime)],
                         bytes,
                     )
                         .into_response();
@@ -457,7 +502,8 @@ async fn stream_video(
     let lib = state.downloader.get_library().await;
     if let Some(item) = lib.into_iter().find(|i| i.id == id) {
         let file_path = state.downloader.download_dir().join(&item.file_name);
-        return stream_file_with_range(file_path, "video/mp4", headers).await;
+        let mime = guess_media_mime(&file_path, "video/mp4");
+        return stream_file_with_range(file_path, mime, headers).await;
     }
     (StatusCode::NOT_FOUND, "Video not found").into_response()
 }
@@ -476,10 +522,11 @@ async fn stream_thumb(
         if let Some(ref cover) = item.cover_file {
             let path = state.downloader.download_dir().join(cover);
             if path.exists() {
-                if let Ok(bytes) = tokio::fs::read(path).await {
+                if let Ok(bytes) = tokio::fs::read(&path).await {
+                    let mime = guess_media_mime(&path, "image/jpeg");
                     return (
                         StatusCode::OK,
-                        [(header::CONTENT_TYPE, "image/jpeg")],
+                        [(header::CONTENT_TYPE, mime)],
                         bytes,
                     )
                         .into_response();
@@ -527,6 +574,18 @@ async fn download_url(
 
     {
         let mut tasks = state.download_tasks.write().await;
+        // Evict older completed/errored tasks if capacity exceeds 100
+        if tasks.len() > 100 {
+            let keys_to_remove: Vec<String> = tasks
+                .iter()
+                .filter(|(_, t)| t.status == "done" || t.status == "error")
+                .map(|(k, _)| k.clone())
+                .take(tasks.len().saturating_sub(80))
+                .collect();
+            for k in keys_to_remove {
+                tasks.remove(&k);
+            }
+        }
         tasks.insert(task_id.clone(), init_state);
     }
 
@@ -584,9 +643,15 @@ async fn download_url(
 
                 let mut tasks = state_clone.download_tasks.write().await;
                 if let Some(t) = tasks.get_mut(&task_id_clone) {
-                    t.status = "done".to_string();
-                    t.percent = 100;
-                    t.items = downloaded_items;
+                    if downloaded_items.is_empty() {
+                        t.status = "error".to_string();
+                        t.error = Some("Не удалось загрузить треки из плейлиста".to_string());
+                        t.percent = 100;
+                    } else {
+                        t.status = "done".to_string();
+                        t.percent = 100;
+                        t.items = downloaded_items;
+                    }
                 }
                 return;
             }
@@ -682,6 +747,19 @@ async fn delete_media(
     auth_check(&state, &headers, None)?;
     let deleted = state.downloader.delete_media_item(&id).await;
     if deleted {
+        // Also clean up playlists to prevent dangling IDs
+        let mut playlists = load_playlists(state.downloader.download_dir()).await;
+        let mut changed = false;
+        for pl in &mut playlists {
+            let before = pl.item_ids.len();
+            pl.item_ids.retain(|item_id| item_id != &id);
+            if pl.item_ids.len() != before {
+                changed = true;
+            }
+        }
+        if changed {
+            save_playlists(state.downloader.download_dir(), &playlists).await;
+        }
         Ok((StatusCode::OK, Json(serde_json::json!({ "status": "deleted" }))))
     } else {
         Ok((StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "Item not found" }))))
@@ -695,9 +773,15 @@ async fn upload_media(
 ) -> Result<impl IntoResponse, Response> {
     auth_check(&state, &headers, None)?;
     let file_id = uuid::Uuid::new_v4().to_string()[..8].to_string();
+    const MAX_UPLOAD_BYTES: usize = 200 * 1024 * 1024; // 200 MB limit
 
     while let Ok(Some(field)) = multipart.next_field().await {
-        let file_name = field.file_name().unwrap_or("upload.mp4").to_string();
+        let raw_name = field.file_name().unwrap_or("upload.mp4");
+        let file_name = StdPath::new(raw_name)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("upload.mp4")
+            .to_string();
         let ext = StdPath::new(&file_name)
             .extension()
             .and_then(|e| e.to_str())
@@ -708,6 +792,12 @@ async fn upload_media(
         let target_path = state.downloader.download_dir().join(&target_name);
 
         if let Ok(data) = field.bytes().await {
+            if data.len() > MAX_UPLOAD_BYTES {
+                return Err((
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    Json(serde_json::json!({ "error": "File exceeds maximum size limit (200MB)" })),
+                ).into_response());
+            }
             if tokio::fs::write(&target_path, data).await.is_ok() {
                 let item = MediaItem {
                     id: file_id.clone(),
@@ -763,7 +853,7 @@ async fn fetch_vault_notes(vault_path: &str) -> Vec<VaultNoteView> {
                         if !name.starts_with('.') && name != "target" && name != "node_modules" {
                             subdirs.push(path);
                         }
-                    } else if path.extension().map_or(false, |e| e == "md") {
+                    } else if path.extension().is_some_and(|e| e == "md") {
                         if let Ok(content) = tokio::fs::read_to_string(&path).await {
                             let note = parse_vault_note_clean(&path, &content, vault_path);
                             notes.push(note);
@@ -784,7 +874,8 @@ async fn get_vault_notes(
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<impl IntoResponse, Response> {
     auth_check(&state, &headers, Some(&query))?;
-    let notes = fetch_vault_notes(&state.engine.config.vault.path).await;
+    let vault_path = state.vault_registry.read().await.get_active_path();
+    let notes = fetch_vault_notes(&vault_path).await;
     Ok(Json(notes))
 }
 
@@ -842,18 +933,30 @@ fn parse_vault_note_clean(path: &StdPath, content: &str, vault_root: &str) -> Va
                 ai_summary = Some(sum);
             }
         }
-        if let Some(end_idx) = content[3..].find("---") {
-            clean_text = content[end_idx + 6..].trim().to_string();
+        if let Some(stripped) = content.strip_prefix("---") {
+            if let Some((_fm, body)) = stripped.split_once("\n---") {
+                clean_text = body.trim().to_string();
+            } else if let Some((_fm, body)) = stripped.split_once("---") {
+                clean_text = body.trim().to_string();
+            }
         }
-    } else if content.starts_with("---") {
-        if let Some(end_idx) = content[3..].find("---") {
-            clean_text = content[end_idx + 6..].trim().to_string();
+    } else if let Some(stripped) = content.strip_prefix("---") {
+        if let Some((_fm, body)) = stripped.split_once("\n---") {
+            clean_text = body.trim().to_string();
+        } else if let Some((_fm, body)) = stripped.split_once("---") {
+            clean_text = body.trim().to_string();
         }
     }
 
-    // Extract summary from blockquote `> 💡 **ИИ-выжимка:** ...` if present in text
+    // Extract summary from blockquote `> **ИИ-выжимка:** ...` if present in text
     if ai_summary.is_none() {
-        if let Some(pos) = clean_text.find("💡 **ИИ-выжимка:**") {
+        if let Some(pos) = clean_text.find("**ИИ-выжимка:**") {
+            let after = &clean_text[pos + "**ИИ-выжимка:**".len()..];
+            let sum_line = after.lines().next().unwrap_or("").trim();
+            if !sum_line.is_empty() {
+                ai_summary = Some(sum_line.to_string());
+            }
+        } else if let Some(pos) = clean_text.find("💡 **ИИ-выжимка:**") {
             let after = &clean_text[pos + "💡 **ИИ-выжимка:**".len()..];
             let sum_line = after.lines().next().unwrap_or("").trim();
             if !sum_line.is_empty() {
@@ -910,11 +1013,58 @@ async fn get_note_properties(
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<impl IntoResponse, Response> {
     auth_check(&state, &headers, Some(&query))?;
-    let notes = fetch_vault_notes(&state.engine.config.vault.path).await;
+    let vault_path = state.vault_registry.read().await.get_active_path();
+    let notes = fetch_vault_notes(&vault_path).await;
     if let Some(note) = notes.into_iter().find(|n| n.id == id) {
         Ok((StatusCode::OK, Json(serde_json::to_value(note).unwrap_or_default())))
     } else {
         Ok((StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "Note not found" }))))
+    }
+}
+
+async fn delete_vault_note(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+) -> Result<impl IntoResponse, Response> {
+    auth_check(&state, &headers, Some(&query))?;
+    let vault_path = state.vault_registry.read().await.get_active_path();
+    let vault_base = match std::fs::canonicalize(&vault_path) {
+        Ok(p) => p,
+        Err(_) => std::path::PathBuf::from(&vault_path),
+    };
+    let notes = fetch_vault_notes(&vault_path).await;
+    
+    if let Some(note) = notes.into_iter().find(|n| n.id == id || n.title == id || n.file_path == id || n.file_path.ends_with(&id)) {
+        let abs_path = if std::path::Path::new(&note.file_path).is_absolute() {
+            std::path::PathBuf::from(&note.file_path)
+        } else {
+            std::path::Path::new(&vault_path).join(&note.file_path)
+        };
+        if let Ok(canon) = std::fs::canonicalize(&abs_path) {
+            if canon.starts_with(&vault_base) {
+                let _ = tokio::fs::remove_file(&canon).await;
+            }
+        } else {
+            let _ = tokio::fs::remove_file(&abs_path).await;
+        }
+        let _ = state.engine.delete_record(&note.file_path).await;
+        let _ = state.engine.delete_record(&note.title).await;
+        let _ = state.engine.delete_record(&note.id).await;
+        let _ = state.engine.delete_record(&abs_path.to_string_lossy()).await;
+        info!("🗑 Deleted vault note: {} ({:?})", note.title, abs_path);
+        Ok((StatusCode::OK, Json(serde_json::json!({ "status": "deleted", "id": id, "title": note.title }))))
+    } else {
+        let candidate_path = std::path::Path::new(&vault_path).join(&id);
+        if let Ok(canon) = std::fs::canonicalize(&candidate_path) {
+            if canon.starts_with(&vault_base) && canon.exists() {
+                let _ = tokio::fs::remove_file(&canon).await;
+            }
+        }
+        let _ = state.engine.delete_record(&id).await;
+        info!("🗑 Deleted vault record by id/path: {}", id);
+        Ok((StatusCode::OK, Json(serde_json::json!({ "status": "deleted", "id": id }))))
     }
 }
 
@@ -937,13 +1087,14 @@ async fn get_stats(
     let lib = state.downloader.get_library().await;
     let total_tracks = lib.iter().filter(|i| i.media_type == "audio").count();
     let total_videos = lib.iter().filter(|i| i.media_type == "video").count();
-    let notes = fetch_vault_notes(&state.engine.config.vault.path).await;
+    let vault_path = state.vault_registry.read().await.get_active_path();
+    let notes = fetch_vault_notes(&vault_path).await;
 
     Ok(Json(SystemStats {
         total_notes: notes.len(),
         total_tracks,
         total_videos,
-        vault_path: state.engine.config.vault.path.clone(),
+        vault_path,
     }))
 }
 
@@ -972,9 +1123,17 @@ async fn stream_file_with_range(
     content_type: &'static str,
     headers: HeaderMap,
 ) -> Response {
-    let metadata = match tokio::fs::metadata(&path).await {
-        Ok(m) => m,
+    use axum::body::Body;
+    use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
+    use tokio_util::io::ReaderStream;
+
+    let mut file = match tokio::fs::File::open(&path).await {
+        Ok(f) => f,
         Err(_) => return (StatusCode::NOT_FOUND, "File not found").into_response(),
+    };
+    let metadata = match file.metadata().await {
+        Ok(m) => m,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Cannot read metadata").into_response(),
     };
     let total_size = metadata.len();
 
@@ -983,26 +1142,20 @@ async fn stream_file_with_range(
             let parts: Vec<&str> = range_spec.split('-').collect();
             let start: u64 = parts[0].parse().unwrap_or(0);
             let end: u64 = if parts.len() > 1 && !parts[1].is_empty() {
-                parts[1].parse().unwrap_or(total_size - 1)
+                parts[1].parse().unwrap_or(total_size.saturating_sub(1))
             } else {
-                total_size - 1
+                total_size.saturating_sub(1)
             };
             let end = end.min(total_size.saturating_sub(1));
 
             if start <= end && start < total_size {
                 let length = end - start + 1;
-                let mut file = match tokio::fs::File::open(&path).await {
-                    Ok(f) => f,
-                    Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Cannot open file").into_response(),
-                };
-                use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
                 if file.seek(SeekFrom::Start(start)).await.is_err() {
                     return (StatusCode::INTERNAL_SERVER_ERROR, "Seek error").into_response();
                 }
-                let mut buffer = vec![0u8; length as usize];
-                if file.read_exact(&mut buffer).await.is_err() {
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "Read error").into_response();
-                }
+                let take_file = file.take(length);
+                let stream = ReaderStream::with_capacity(take_file, 65536);
+                let body = Body::from_stream(stream);
 
                 return (
                     StatusCode::PARTIAL_CONTENT,
@@ -1015,26 +1168,26 @@ async fn stream_file_with_range(
                         ),
                         (header::CONTENT_LENGTH, length.to_string()),
                     ],
-                    buffer,
+                    body,
                 )
                     .into_response();
             }
         }
     }
 
-    match tokio::fs::read(&path).await {
-        Ok(bytes) => (
-            StatusCode::OK,
-            [
-                (header::CONTENT_TYPE, content_type.to_string()),
-                (header::ACCEPT_RANGES, "bytes".to_string()),
-                (header::CONTENT_LENGTH, total_size.to_string()),
-            ],
-            bytes,
-        )
-            .into_response(),
-        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Cannot read file").into_response(),
-    }
+    let stream = ReaderStream::with_capacity(file, 65536);
+    let body = Body::from_stream(stream);
+
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, content_type.to_string()),
+            (header::ACCEPT_RANGES, "bytes".to_string()),
+            (header::CONTENT_LENGTH, total_size.to_string()),
+        ],
+        body,
+    )
+        .into_response()
 }
 
 // ── Playlist Management ─────────────────────────────────────────────────────
@@ -1099,7 +1252,7 @@ async fn get_playlists(
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<impl IntoResponse, Response> {
     auth_check(&state, &headers, Some(&query))?;
-    let list = load_playlists(&state.downloader.download_dir()).await;
+    let list = load_playlists(state.downloader.download_dir()).await;
     Ok(Json(list))
 }
 
@@ -1109,17 +1262,17 @@ async fn create_playlist(
     Json(payload): Json<CreatePlaylistRequest>,
 ) -> Result<impl IntoResponse, Response> {
     auth_check(&state, &headers, None)?;
-    let mut list = load_playlists(&state.downloader.download_dir()).await;
+    let mut list = load_playlists(state.downloader.download_dir()).await;
     let pl_type = payload.playlist_type.unwrap_or_else(|| "audio".to_string());
     let pl = Playlist {
-        id: format!("pl_{}", uuid::Uuid::new_v4().to_string()[..8].to_string()),
+        id: format!("pl_{}", &uuid::Uuid::new_v4().to_string()[..8]),
         name: payload.name.trim().to_string(),
         playlist_type: pl_type,
         item_ids: vec![],
         created_at: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
     };
     list.push(pl.clone());
-    save_playlists(&state.downloader.download_dir(), &list).await;
+    save_playlists(state.downloader.download_dir(), &list).await;
     Ok((StatusCode::CREATED, Json(pl)))
 }
 
@@ -1129,11 +1282,11 @@ async fn delete_playlist(
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, Response> {
     auth_check(&state, &headers, None)?;
-    let mut list = load_playlists(&state.downloader.download_dir()).await;
+    let mut list = load_playlists(state.downloader.download_dir()).await;
     let initial_len = list.len();
     list.retain(|p| p.id != id);
     if list.len() < initial_len {
-        save_playlists(&state.downloader.download_dir(), &list).await;
+        save_playlists(state.downloader.download_dir(), &list).await;
         Ok((StatusCode::OK, Json(serde_json::json!({ "status": "deleted" }))))
     } else {
         Ok((StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "Playlist not found" }))))
@@ -1147,13 +1300,13 @@ async fn add_item_to_playlist(
     Json(payload): Json<AddPlaylistItemRequest>,
 ) -> Result<impl IntoResponse, Response> {
     auth_check(&state, &headers, None)?;
-    let mut list = load_playlists(&state.downloader.download_dir()).await;
+    let mut list = load_playlists(state.downloader.download_dir()).await;
     if let Some(pl) = list.iter_mut().find(|p| p.id == id) {
         if !pl.item_ids.contains(&payload.item_id) {
             pl.item_ids.push(payload.item_id);
         }
         let updated = pl.clone();
-        save_playlists(&state.downloader.download_dir(), &list).await;
+        save_playlists(state.downloader.download_dir(), &list).await;
         Ok((StatusCode::OK, Json(serde_json::to_value(updated).unwrap_or_default())))
     } else {
         Ok((StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "Playlist not found" }))))
@@ -1166,11 +1319,11 @@ async fn remove_item_from_playlist(
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, Response> {
     auth_check(&state, &headers, None)?;
-    let mut list = load_playlists(&state.downloader.download_dir()).await;
+    let mut list = load_playlists(state.downloader.download_dir()).await;
     if let Some(pl) = list.iter_mut().find(|p| p.id == id) {
         pl.item_ids.retain(|i| i != &item_id);
         let updated = pl.clone();
-        save_playlists(&state.downloader.download_dir(), &list).await;
+        save_playlists(state.downloader.download_dir(), &list).await;
         Ok((StatusCode::OK, Json(serde_json::to_value(updated).unwrap_or_default())))
     } else {
         Ok((StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "Playlist not found" }))))

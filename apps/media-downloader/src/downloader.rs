@@ -62,13 +62,17 @@ pub struct SpotifyEntity {
 
 pub struct MediaDownloader {
     download_dir: PathBuf,
+    lib_lock: tokio::sync::Mutex<()>,
 }
 
 impl MediaDownloader {
     pub fn new(download_dir: impl Into<PathBuf>) -> Self {
         let dir = download_dir.into();
         let _ = std::fs::create_dir_all(&dir);
-        Self { download_dir: dir }
+        Self {
+            download_dir: dir,
+            lib_lock: tokio::sync::Mutex::new(()),
+        }
     }
 
     pub fn detect_url(text: &str) -> Option<(String, Platform, MediaType)> {
@@ -202,6 +206,7 @@ impl MediaDownloader {
                 "--flat-playlist",
                 "--extractor-args",
                 "youtube:player_client=ios,android,web",
+                "--",
                 &url_str,
             ])
             .output()
@@ -441,32 +446,44 @@ impl MediaDownloader {
     }
 
     pub async fn save_media_item(&self, item: MediaItem) {
+        let _guard = self.lib_lock.lock().await;
         let mut lib = self.get_library().await;
         // Prepend and dedup by id
         lib.retain(|i| i.id != item.id);
         lib.insert(0, item);
         let path = self.download_dir.join("media_library.json");
+        let tmp_path = self.download_dir.join("media_library.json.tmp");
         if let Ok(json) = serde_json::to_string_pretty(&lib) {
-            let _ = tokio::fs::write(&path, json).await;
+            if tokio::fs::write(&tmp_path, json).await.is_ok() {
+                let _ = tokio::fs::rename(&tmp_path, &path).await;
+            }
         }
     }
 
     pub async fn delete_media_item(&self, id: &str) -> bool {
+        let _guard = self.lib_lock.lock().await;
         let mut lib = self.get_library().await;
         let original_len = lib.len();
         if let Some(item) = lib.iter().find(|i| i.id == id).cloned() {
-            let file_path = self.download_dir.join(&item.file_name);
-            let _ = tokio::fs::remove_file(file_path).await;
+            if let Some(fname) = std::path::Path::new(&item.file_name).file_name() {
+                let file_path = self.download_dir.join(fname);
+                let _ = tokio::fs::remove_file(file_path).await;
+            }
             if let Some(ref cover) = item.cover_file {
-                let cover_path = self.download_dir.join(cover);
-                let _ = tokio::fs::remove_file(cover_path).await;
+                if let Some(cname) = std::path::Path::new(cover).file_name() {
+                    let cover_path = self.download_dir.join(cname);
+                    let _ = tokio::fs::remove_file(cover_path).await;
+                }
             }
         }
         lib.retain(|i| i.id != id);
         if lib.len() != original_len {
             let path = self.download_dir.join("media_library.json");
+            let tmp_path = self.download_dir.join("media_library.json.tmp");
             if let Ok(json) = serde_json::to_string_pretty(&lib) {
-                let _ = tokio::fs::write(&path, json).await;
+                if tokio::fs::write(&tmp_path, json).await.is_ok() {
+                    let _ = tokio::fs::rename(&tmp_path, &path).await;
+                }
             }
             true
         } else {
@@ -475,10 +492,20 @@ impl MediaDownloader {
     }
 
     pub fn ytdlp_cmd() -> TokioCommand {
+        if let Ok(custom_path) = std::env::var("YTDLP_PATH") {
+            if std::path::Path::new(&custom_path).exists() {
+                return TokioCommand::new(custom_path);
+            }
+        }
         if std::path::Path::new("./bin/yt-dlp").exists() {
             TokioCommand::new("./bin/yt-dlp")
-        } else if std::path::Path::new("/home/mrbezarate/bin/yt-dlp").exists() {
-            TokioCommand::new("/home/mrbezarate/bin/yt-dlp")
+        } else if let Ok(home) = std::env::var("HOME") {
+            let home_bin = std::path::PathBuf::from(home).join("bin/yt-dlp");
+            if home_bin.exists() {
+                TokioCommand::new(home_bin)
+            } else {
+                TokioCommand::new("yt-dlp")
+            }
         } else {
             TokioCommand::new("yt-dlp")
         }
@@ -638,42 +665,181 @@ impl MediaDownloader {
         (title, artist, cover_url)
     }
 
-    pub async fn search_spotify_track(artist: &str, title: &str) -> Option<String> {
-        let queries = if !artist.is_empty() {
-            vec![
-                format!("ytmsearch1:\"{}\" \"{}\" audio", artist, title),
-                format!("ytsearch1:\"{}\" - \"{}\"", artist, title),
-                format!("ytsearch1:{} {} audio", artist, title),
-                format!("ytsearch1:{} {}", title, artist),
-            ]
+    pub fn parse_artist_list(uploader: &str) -> Vec<String> {
+        let re = Regex::new(r"(?i)\s*(?:,|;|&|/|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b)\s*").unwrap();
+        let mut list = Vec::new();
+        for part in re.split(uploader) {
+            let clean = part
+                .trim()
+                .trim_matches(|c| c == '(' || c == ')' || c == '[' || c == ']' || c == '"' || c == '\'')
+                .trim();
+            if !clean.is_empty() && !list.iter().any(|existing: &String| existing.eq_ignore_ascii_case(clean)) {
+                list.push(clean.to_string());
+            }
+        }
+        if list.is_empty() && !uploader.trim().is_empty() {
+            list.push(uploader.trim().to_string());
+        }
+        list
+    }
+
+    pub fn extract_song_variant(title: &str) -> Option<&'static str> {
+        let lower = title.to_lowercase();
+        if lower.contains("sped up") || lower.contains("speed up") || lower.contains("speedup") {
+            Some("sped up")
+        } else if lower.contains("slowed") || lower.contains("slow down") || lower.contains("slowdown") {
+            Some("slowed")
+        } else if lower.contains("nightcore") {
+            Some("nightcore")
+        } else if lower.contains("reverb") {
+            Some("reverb")
+        } else if lower.contains("instrumental") || lower.contains("karaoke") {
+            Some("instrumental")
+        } else if lower.contains("acoustic") {
+            Some("acoustic")
+        } else if lower.contains("live") {
+            Some("live")
+        } else if lower.contains("remix") {
+            Some("remix")
         } else {
-            vec![
-                format!("ytmsearch1:\"{}\" audio", title),
-                format!("ytsearch1:{} audio", title),
-                format!("ytsearch1:{}", title),
-            ]
-        };
+            None
+        }
+    }
+
+    pub async fn search_spotify_track(artist: &str, title: &str) -> Option<String> {
+        let artists = Self::parse_artist_list(artist);
+        let primary_artist = artists.first().map(|s| s.as_str()).unwrap_or("");
+        let variant = Self::extract_song_variant(title);
+
+        let mut queries = Vec::new();
+        if let Some(var) = variant {
+            // Precision queries for variations (Sped up, Slowed, etc.)
+            if !primary_artist.is_empty() {
+                queries.push(format!("ytsearch5:{} {} {} audio", primary_artist, title, var));
+                queries.push(format!("ytmsearch5:{} {} {}", primary_artist, title, var));
+                queries.push(format!("ytsearch5:{} {}", title, var));
+                queries.push(format!("scsearch5:{} {} {}", primary_artist, title, var));
+            } else {
+                queries.push(format!("ytsearch5:{} {} audio", title, var));
+                queries.push(format!("ytmsearch5:{} {}", title, var));
+                queries.push(format!("scsearch5:{} {}", title, var));
+            }
+        } else {
+            // Official / studio version queries
+            if !primary_artist.is_empty() {
+                queries.push(format!("ytmsearch5:{} {}", primary_artist, title));
+                queries.push(format!("ytsearch5:{} - {} official audio", primary_artist, title));
+                queries.push(format!("ytsearch5:{} {}", primary_artist, title));
+                queries.push(format!("scsearch5:{} {}", primary_artist, title));
+            } else {
+                queries.push(format!("ytmsearch5:{} audio", title));
+                queries.push(format!("ytsearch5:{} official audio", title));
+                queries.push(format!("ytsearch5:{}", title));
+                queries.push(format!("scsearch5:{}", title));
+            }
+        }
+
+        let title_words: Vec<String> = title
+            .to_lowercase()
+            .split_whitespace()
+            .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_string())
+            .filter(|w| w.len() > 1)
+            .collect();
+
+        let mut best_url = None;
+        let mut best_score = -1000.0;
 
         for query in queries {
             let output = Self::ytdlp_cmd()
-                .args(["--dump-json", "--no-download", "--no-warnings", &query])
+                .args(["--dump-json", "--no-download", "--no-warnings", "--", &query])
                 .output()
                 .await;
 
             if let Ok(out) = output {
                 if out.status.success() {
                     let stdout = String::from_utf8_lossy(&out.stdout);
-                    if let Some(first_line) = stdout.lines().next() {
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(first_line) {
-                            if let Some(url) = json.get("webpage_url").or_else(|| json.get("url")).and_then(|v| v.as_str()) {
-                                return Some(url.to_string());
+                    for line in stdout.lines() {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+                            let cand_title = json.get("title").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+                            let cand_uploader = json.get("uploader").or_else(|| json.get("channel")).and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+                            let cand_url = json.get("webpage_url").or_else(|| json.get("url")).and_then(|v| v.as_str());
+                            let duration = json.get("duration").and_then(|v| v.as_f64()).unwrap_or(0.0);
+
+                            let Some(url) = cand_url else { continue; };
+
+                            let mut score = 0.0;
+
+                            // 1. Variant matching score (CRITICAL)
+                            if let Some(var) = variant {
+                                if cand_title.contains(var) {
+                                    score += 70.0;
+                                } else {
+                                    score -= 80.0; // Heavily penalize missing required modifier!
+                                }
+                            } else {
+                                // If standard track, penalize accidental remixes / sped-up versions
+                                if cand_title.contains("sped up") || cand_title.contains("speed up") || cand_title.contains("slowed") || cand_title.contains("nightcore") {
+                                    score -= 60.0;
+                                }
+                            }
+
+                            // 2. Title words overlap
+                            let mut matched_title_words = 0;
+                            for w in &title_words {
+                                if cand_title.contains(w) {
+                                    matched_title_words += 1;
+                                    score += 15.0;
+                                }
+                            }
+                            if !title_words.is_empty() && matched_title_words == 0 {
+                                score -= 50.0;
+                            }
+
+                            // 3. Artist overlap
+                            for a in &artists {
+                                let a_low = a.to_lowercase();
+                                if cand_title.contains(&a_low) || cand_uploader.contains(&a_low) {
+                                    score += 25.0;
+                                }
+                            }
+
+                            // 4. Official quality indicators
+                            if cand_title.contains("official audio") || cand_title.contains("official track") || cand_uploader.contains("topic") || cand_uploader.contains("vevo") {
+                                score += 20.0;
+                            }
+
+                            // 5. Penalize spam / bad candidates
+                            if cand_title.contains("1 hour") || cand_title.contains("10 hours") || cand_title.contains("10h") || cand_title.contains("full album") || cand_title.contains("tutorial") || cand_title.contains("reaction") {
+                                score -= 90.0;
+                            }
+
+                            // 6. Reasonable song duration (between 40s and 900s for a single track)
+                            if duration > 0.0 {
+                                if duration < 40.0 || duration > 900.0 {
+                                    score -= 70.0;
+                                }
+                            }
+
+                            if score > best_score {
+                                best_score = score;
+                                best_url = Some(url.to_string());
                             }
                         }
+                    }
+
+                    // If we found a high confidence candidate (score >= 40.0), return immediately
+                    if best_score >= 40.0 && best_url.is_some() {
+                        return best_url;
                     }
                 }
             }
         }
-        None
+
+        if best_score > 0.0 {
+            best_url
+        } else {
+            None
+        }
     }
 
     pub async fn download_spotify_track_direct(
@@ -709,17 +875,18 @@ impl MediaDownloader {
         }
 
         let mut download_targets = Vec::new();
-        if !artist.is_empty() {
-            download_targets.push(format!("scsearch1:{} {}", artist, title));
-            download_targets.push(format!("scsearch5:{} {}", artist, title));
+        if let Some(verified_url) = Self::search_spotify_track(artist, title).await {
+            download_targets.push(verified_url);
         }
-        if let Some(found_url) = Self::search_spotify_track(artist, title).await {
-            download_targets.push(found_url);
-        } else if !artist.is_empty() {
-            download_targets.push(format!("ytsearch1:{} {} audio", artist, title));
+        
+        let primary_artist = Self::parse_artist_list(artist).first().cloned().unwrap_or_default();
+        if !primary_artist.is_empty() {
+            download_targets.push(format!("ytsearch1:{} {} audio", primary_artist, title));
+            download_targets.push(format!("scsearch1:{} {}", primary_artist, title));
+        } else {
+            download_targets.push(format!("ytsearch1:{} audio", title));
+            download_targets.push(format!("scsearch1:{}", title));
         }
-        download_targets.push(format!("scsearch3:{}", title));
-        download_targets.push(format!("ytsearch1:{} audio", title));
 
         let mut downloaded_path = None;
         for target in download_targets {
@@ -735,15 +902,16 @@ impl MediaDownloader {
                 "--embed-metadata",
                 "--add-metadata",
             ]);
+            cmd.arg("--");
             cmd.arg(&target);
 
             let status = cmd.status().await;
             if status.as_ref().map_or(false, |s| s.success()) && expected_file.exists() {
                 downloaded_path = Some(expected_file.clone());
                 break;
-            } else if let Ok(entries) = std::fs::read_dir(&self.download_dir) {
+            } else if let Ok(mut entries) = tokio::fs::read_dir(&self.download_dir).await {
                 let mut found = None;
-                for entry in entries.flatten() {
+                while let Ok(Some(entry)) = entries.next_entry().await {
                     let path = entry.path();
                     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
                     if name.starts_with(&file_id) && (name.ends_with(".mp3") || name.ends_with(".m4a") || name.ends_with(".webm") || name.ends_with(".opus")) {
@@ -802,18 +970,32 @@ impl MediaDownloader {
         if let Some(mat) = og_re.find(&html) {
             let tag = mat.as_str();
             if let Some(caps) = content_re.captures(tag) {
-                let url_str = caps.get(1).unwrap().as_str();
-                img_url_opt = Some(
-                    url_str
-                        .replace("/736x/", "/originals/")
-                        .replace("/474x/", "/originals/")
-                        .replace("/236x/", "/originals/"),
-                );
+                if let Some(url_str) = caps.get(1).map(|m| m.as_str()) {
+                    img_url_opt = Some(
+                        url_str
+                            .replace("/736x/", "/originals/")
+                            .replace("/474x/", "/originals/")
+                            .replace("/236x/", "/originals/"),
+                    );
+                }
             }
         }
         if img_url_opt.is_none() {
             if let Some(caps) = json_re.captures(&html) {
-                img_url_opt = Some(caps.get(1).unwrap().as_str().to_string());
+                if let Some(c) = caps.get(1) {
+                    img_url_opt = Some(c.as_str().to_string());
+                }
+            }
+        }
+
+        let title_re = regex::Regex::new(r#"<meta(?:[^>]+)og:title(?:[^>]+)content="([^"]+)""#).unwrap();
+        let mut pin_title = "Pinterest Image".to_string();
+        if let Some(caps) = title_re.captures(&html) {
+            if let Some(t) = caps.get(1) {
+                let clean_title = t.as_str().replace("&amp;", "&").replace("&#39;", "'").replace("&quot;", "\"").trim().to_string();
+                if !clean_title.is_empty() && clean_title != "Pinterest" {
+                    pin_title = clean_title;
+                }
             }
         }
 
@@ -826,7 +1008,7 @@ impl MediaDownloader {
 
             let item = MediaItem {
                 id: file_id.clone(),
-                title: "Pinterest Image".to_string(),
+                title: pin_title,
                 uploader: Some("Pinterest".to_string()),
                 media_type: "photo".to_string(),
                 file_name: format!("{}.jpg", file_id),
@@ -839,7 +1021,7 @@ impl MediaDownloader {
             return Ok((file_path, item));
         }
 
-        anyhow::bail!("Failed to extract Pinterest image")
+        anyhow::bail!("Could not extract full image URL from Pinterest page")
     }
 
     pub async fn download(&self, url: &str, quality: Quality) -> anyhow::Result<PathBuf> {
@@ -917,6 +1099,7 @@ impl MediaDownloader {
             cmd.args(["-f", quality.ytdlp_format()]);
         }
 
+        cmd.arg("--");
         cmd.arg(&download_target);
 
         let status = cmd.status().await;
@@ -927,8 +1110,8 @@ impl MediaDownloader {
                     expected_file.clone()
                 } else {
                     let mut found = None;
-                    if let Ok(entries) = std::fs::read_dir(&self.download_dir) {
-                        for entry in entries.flatten() {
+                    if let Ok(mut entries) = tokio::fs::read_dir(&self.download_dir).await {
+                        while let Ok(Some(entry)) = entries.next_entry().await {
                             let path = entry.path();
                             if path.file_name().and_then(|n| n.to_str()).map_or(false, |name| name.starts_with(&file_id) && !name.ends_with(".jpg") && !name.ends_with(".webp")) {
                                 found = Some(path);
@@ -954,8 +1137,8 @@ impl MediaDownloader {
             Some(format!("{}.jpg", file_id))
         } else {
             let mut found_thumb = None;
-            if let Ok(entries) = std::fs::read_dir(&self.download_dir) {
-                for entry in entries.flatten() {
+            if let Ok(mut entries) = tokio::fs::read_dir(&self.download_dir).await {
+                while let Ok(Some(entry)) = entries.next_entry().await {
                     let path = entry.path();
                     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
                     if name.starts_with(&file_id) && (name.ends_with(".jpg") || name.ends_with(".png") || name.ends_with(".webp")) {
@@ -1052,7 +1235,7 @@ impl MediaDownloader {
         // 2. YouTube or other playlists via yt-dlp
         let mut track_urls = Vec::new();
         let output = Self::ytdlp_cmd()
-            .args(["--dump-json", "--flat-playlist", "--extractor-args", "youtube:player_client=ios,android,web", url])
+            .args(["--dump-json", "--flat-playlist", "--extractor-args", "youtube:player_client=ios,android,web", "--", url])
             .output()
             .await;
 

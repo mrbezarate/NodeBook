@@ -24,6 +24,7 @@ impl MediaDownloaderPlugin {
         }
     }
 
+    #[allow(dead_code)]
     async fn store_url(&self, url: &str) -> String {
         let short_id = uuid::Uuid::new_v4().to_string()[..8].to_string();
         let mut cache = self.url_cache.write().await;
@@ -299,6 +300,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires external network and live yt-dlp credentials"]
     async fn test_spotify_url_handling() {
         let plugin = MediaDownloaderPlugin::new("/tmp/test_downloads");
         let spotify_url = "https://open.spotify.com/playlist/37i9dQZF1E8LWhdHrhPehc";

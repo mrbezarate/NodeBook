@@ -3,7 +3,6 @@ use teloxide::prelude::*;
 use std::sync::Arc;
 use brain_core::engine::BrainEngine;
 use crate::state::{StateManager, UserState};
-use crate::keyboard::reply::main_menu_keyboard;
 
 pub async fn handle_command(
     bot: &Bot,
@@ -153,35 +152,41 @@ pub async fn handle_command(
             }
         }
         "/metrics" => {
-            let report = engine.get_metrics_report().await.map_err(|e| anyhow::anyhow!(e)).unwrap();
-            let formatted = format!(
-                "📊 <b>System Metrics Report</b>\n\
-                \n<b>Пайплайн</b>\n\
-                • Обработано: <b>{}</b>\n\
-                • Latency: <b>{:.0} ms</b>\n\
-                \n<b>Extractor</b>\n\
-                • JSON parse success: <b>{:.1}%</b>\n\
-                • Пустых ответов: <b>{:.1}%</b>\n\
-                • В среднем сущностей: <b>{:.1}</b>\n\
-                • Confidence (avg): <b>{:.2}</b>\n\
-                \n<b>Identity Resolver</b>\n\
-                • Exact: <b>{}</b>\n\
-                • Alias: <b>{}</b>\n\
-                • Fuzzy: <b>{}</b>\n\
-                • Semantic: <b>{}</b>\n\
-                • No Match: <b>{}</b>\n\
-                \n<b>Projection</b>\n\
-                • Entities: <b>{}</b>\n\
-                • Observations: <b>{}</b>\n\
-                • Obs per Entity (avg): <b>{:.1}</b>",
-                report.processed_events, report.avg_latency_ms, 
-                report.json_success_rate, report.empty_responses_percent, report.avg_entities_extracted, report.avg_confidence,
-                report.identity_exact, report.identity_alias, report.identity_fuzzy, report.identity_semantic, report.identity_nomatch,
-                report.total_entities, report.total_observations, report.avg_obs_per_entity
-            );
-            bot.send_message(chat_id, formatted)
-                .parse_mode(teloxide::types::ParseMode::Html)
-                .await?;
+            match engine.get_metrics_report().await {
+                Ok(report) => {
+                    let formatted = format!(
+                        "📊 <b>System Metrics Report</b>\n\
+                        \n<b>Пайплайн</b>\n\
+                        • Обработано: <b>{}</b>\n\
+                        • Latency: <b>{:.0} ms</b>\n\
+                        \n<b>Extractor</b>\n\
+                        • JSON parse success: <b>{:.1}%</b>\n\
+                        • Пустых ответов: <b>{:.1}%</b>\n\
+                        • В среднем сущностей: <b>{:.1}</b>\n\
+                        • Confidence (avg): <b>{:.2}</b>\n\
+                        \n<b>Identity Resolver</b>\n\
+                        • Exact: <b>{}</b>\n\
+                        • Alias: <b>{}</b>\n\
+                        • Fuzzy: <b>{}</b>\n\
+                        • Semantic: <b>{}</b>\n\
+                        • No Match: <b>{}</b>\n\
+                        \n<b>Projection</b>\n\
+                        • Entities: <b>{}</b>\n\
+                        • Observations: <b>{}</b>\n\
+                        • Obs per Entity (avg): <b>{:.1}</b>",
+                        report.processed_events, report.avg_latency_ms, 
+                        report.json_success_rate, report.empty_responses_percent, report.avg_entities_extracted, report.avg_confidence,
+                        report.identity_exact, report.identity_alias, report.identity_fuzzy, report.identity_semantic, report.identity_nomatch,
+                        report.total_entities, report.total_observations, report.avg_obs_per_entity
+                    );
+                    bot.send_message(chat_id, formatted)
+                        .parse_mode(teloxide::types::ParseMode::Html)
+                        .await?;
+                }
+                Err(e) => {
+                    bot.send_message(chat_id, format!("❌ Ошибка получения метрик: {}", e)).await?;
+                }
+            }
         }
         "/debug" => {
             if let Some(event_id) = args.split_whitespace().next() {
@@ -212,16 +217,32 @@ pub async fn handle_command(
             if let Some(event_id) = args.split_whitespace().next() {
                 match engine.rebuild_from_event(event_id).await {
                     Ok(_) => {
-                        bot.send_message(chat_id, format!("✅ Событие {} отправлено на повторную обработку.", event_id))
-                            .parse_mode(teloxide::types::ParseMode::Html)
+                        bot.send_message(chat_id, format!("Событие {} отправлено на повторную обработку.", event_id))
                             .await?;
                     }
                     Err(e) => {
-                        bot.send_message(chat_id, format!("❌ Ошибка при ребилде: {}", e)).await?;
+                        bot.send_message(chat_id, format!("Ошибка при ребилде: {}", e)).await?;
                     }
                 }
             } else {
-                bot.send_message(chat_id, "⚠️ Укажите event_id: <code>/rebuild &lt;event_id&gt;</code>")
+                bot.send_message(chat_id, "Укажите event_id: <code>/rebuild &lt;event_id&gt;</code>")
+                    .parse_mode(teloxide::types::ParseMode::Html)
+                    .await?;
+            }
+        }
+        "/delete" | "/del" | "/rm" => {
+            if let Some(target) = args.split_whitespace().next() {
+                match engine.delete_record(target).await {
+                    Ok(_) => {
+                        bot.send_message(chat_id, format!("Запись '{}' успешно удалена из всех баз данных и хранилищ.", target))
+                            .await?;
+                    }
+                    Err(e) => {
+                        bot.send_message(chat_id, format!("Ошибка при удалении записи: {}", e)).await?;
+                    }
+                }
+            } else {
+                bot.send_message(chat_id, "Укажите ID или путь: <code>/delete &lt;id_or_path&gt;</code>")
                     .parse_mode(teloxide::types::ParseMode::Html)
                     .await?;
             }

@@ -16,6 +16,7 @@ pub fn yes_no_keyboard(prefix: &str) -> InlineKeyboardMarkup {
     ]])
 }
 
+#[allow(dead_code)]
 pub fn entry_actions_keyboard(entry_id: &str) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![

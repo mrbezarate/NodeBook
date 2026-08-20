@@ -431,7 +431,7 @@ pub async fn start_diary(
 
     // Получаем погоду
     let city = if engine.config.diary.city.is_empty() {
-        engine.config.diary.timezone.split('/').last().unwrap_or("Moscow")
+        engine.config.diary.timezone.split('/').next_back().unwrap_or("Moscow")
     } else {
         &engine.config.diary.city
     };

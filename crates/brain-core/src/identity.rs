@@ -31,14 +31,21 @@ impl IdentityResolver for CascadedIdentityResolver {
             if let Ok(query_embedding) = embeddings.embed(query).await {
                 if let Ok(search_results) = vector_store.search(&query_embedding, 20).await {
                     for res in search_results {
-                        if res.0.starts_with("entity:") {
-                            let entity_name = res.0.trim_start_matches("entity:");
-                            if let Ok(Some(entity)) = self.store.get_entity(entity_name).await {
+                        let entity_name = res.0.strip_prefix("entity:").unwrap_or(&res.0);
+                        if let Ok(Some(entity)) = self.store.get_entity(entity_name).await {
+                            if !candidates.iter().any(|c: &brain_common::Entity| c.id == entity.id) {
                                 candidates.push(entity);
                             }
                         }
                     }
                 }
+            }
+        }
+
+        // Fallback: If candidates are still empty, load from KnowledgeStore
+        if candidates.is_empty() {
+            if let Ok(all_entities) = self.store.list_entities(None).await {
+                candidates = all_entities;
             }
         }
 

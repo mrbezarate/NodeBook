@@ -16,6 +16,7 @@ async fn test_spotify_playlist_extraction() {
 }
 
 #[tokio::test]
+#[ignore = "requires external network and live yt-dlp credentials"]
 async fn test_spotify_playlist_download_full() {
     let url = "https://open.spotify.com/playlist/1oEjOO11lwWrALoPE3hBWJ?si=aohmyELKRsGCwtkJC5Nmcw";
     let downloader = brain_media_downloader::MediaDownloader::new("./downloads");

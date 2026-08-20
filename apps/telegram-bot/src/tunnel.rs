@@ -81,7 +81,7 @@ impl TunnelManager {
     pub async fn update_telegram_menu_button(bot: &teloxide::Bot, url: &str) -> anyhow::Result<()> {
         if let Ok(parsed_url) = reqwest::Url::parse(url) {
             use teloxide::prelude::*;
-            use teloxide::types::{ChatId, MenuButton, WebAppInfo};
+            use teloxide::types::{MenuButton, WebAppInfo};
 
             let menu_button = MenuButton::WebApp {
                 text: "📱 Open App".to_string(),
@@ -89,7 +89,6 @@ impl TunnelManager {
             };
 
             let _ = bot.set_chat_menu_button().menu_button(menu_button.clone()).await;
-            let _ = bot.set_chat_menu_button().chat_id(ChatId(5887915765)).menu_button(menu_button).await;
             info!("🎉 Telegram Mini App menu button successfully updated with {}", url);
         }
         Ok(())

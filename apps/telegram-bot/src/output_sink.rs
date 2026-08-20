@@ -6,11 +6,13 @@ use brain_core::traits::OutputSink;
 use std::sync::Arc;
 use teloxide::prelude::*;
 
+#[allow(dead_code)]
 pub struct TelegramOutputSink {
     bot: Bot,
     chat_id: teloxide::types::ChatId,
 }
 
+#[allow(dead_code)]
 impl TelegramOutputSink {
     pub fn new(bot: Bot, chat_id: teloxide::types::ChatId) -> Arc<Self> {
         Arc::new(Self { bot, chat_id })

@@ -3,7 +3,7 @@ pub fn mean(data: &[f32]) -> f32 { if data.is_empty() { 0.0 } else { data.iter()
 
 pub fn median(data: &mut [f32]) -> f32 {
     if data.is_empty() { return 0.0; }
-    data.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    data.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let mid = data.len() / 2;
     if data.len() % 2 == 0 { (data[mid - 1] + data[mid]) / 2.0 } else { data[mid] }
 }

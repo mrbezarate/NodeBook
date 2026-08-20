@@ -83,16 +83,13 @@ impl BrainEngine {
     }
 
     pub async fn ingest(&self, text: &str, source: EntrySource) -> Result<(BrainEntry, String)> {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        
-        let mut hasher = DefaultHasher::new();
-        text.hash(&mut hasher);
         let id_str = match &source {
             EntrySource::Telegram { message_id, .. } => message_id.to_string(),
-            _ => hasher.finish().to_string(),
+            _ => uuid::Uuid::new_v4().to_string(),
         };
-        let hash_key = format!("{}_{}", id_str, hasher.finish());
+        let digest = ring::digest::digest(&ring::digest::SHA256, text.as_bytes());
+        let hash_hex: String = digest.as_ref().iter().map(|b| format!("{:02x}", b)).collect();
+        let hash_key = format!("{}_{}", id_str, &hash_hex[..16]);
 
         if let Some(ref store) = self.raw_event_store {
             let (source_type, source_id, external_id) = match &source {
@@ -116,30 +113,26 @@ impl BrainEngine {
                 tracing::warn!("Idempotency hit or DB error! Skipping duplicate ingestion for {}: {}", hash_key, e);
                 return Err(brain_common::BrainError::Validation("Duplicate message (idempotency hit)".into()));
             }
+
+            let events = vec![
+                brain_common::SourcingEvent::MessageIngested { text: text.to_string(), source: source.clone() },
+                brain_common::SourcingEvent::LlmProcessRequested { text: text.to_string(), source: source.clone() },
+                brain_common::SourcingEvent::EmbeddingProcessRequested { text: text.to_string() },
+            ];
+            for ev in events {
+                let record = brain_common::SourcingEventRecord {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    aggregate_id: hash_key.clone(),
+                    event: ev,
+                    created_at: chrono::Utc::now(),
+                };
+                if let Err(e) = store.append_audit_event(&record).await {
+                    tracing::error!("Event append failed: {:?}", e);
+                }
+            }
         }
         let span = tracing::info_span!("ingest", message_id = %hash_key);
         let _enter = span.enter();
-
-        let log_event = |aggregate_id: String, event: brain_common::SourcingEvent| {
-            if let Some(ref store) = self.raw_event_store {
-                let store = store.clone();
-                let record = brain_common::SourcingEventRecord {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    aggregate_id,
-                    event,
-                    created_at: chrono::Utc::now(),
-                };
-                tokio::spawn(async move {
-                    if let Err(e) = store.append_audit_event(&record).await {
-                        tracing::error!("Event append failed: {:?}", e);
-                    }
-                });
-            }
-        };
-
-        log_event(hash_key.clone(), brain_common::SourcingEvent::MessageIngested { text: text.to_string(), source: source.clone() });
-        log_event(hash_key.clone(), brain_common::SourcingEvent::LlmProcessRequested { text: text.to_string(), source: source.clone() });
-        log_event(hash_key.clone(), brain_common::SourcingEvent::EmbeddingProcessRequested { text: text.to_string() });
         
         tracing::info!("Ingest async accepted: {}", text);
         
@@ -175,7 +168,6 @@ impl BrainEngine {
             if let Some(ref store) = self.raw_event_store {
                 match store.next_unprocessed_event("LlmProcessRequested").await {
                     Ok(Some(record)) => {
-                        let _ = store.mark_event_processed(&record.id).await;
                         if let brain_common::SourcingEvent::LlmProcessRequested { text, source } = record.event {
                             let request_id = uuid::Uuid::new_v4().to_string();
                             tracing::info!(request_id = %request_id, aggregate_id = %record.aggregate_id, "start LLM request");
@@ -226,18 +218,21 @@ impl BrainEngine {
                                         created_at: chrono::Utc::now(),
                                     };
                                     let _ = store.append_audit_event(&rec).await;
+                                    let _ = store.mark_event_processed(&record.id).await;
                                 }
                                 Ok(Err(e)) => {
                                     tracing::error!(request_id = %request_id, error = %e, "Pipeline process error");
                                     let ev = brain_common::SourcingEvent::FallbackTriggered { reason: format!("Pipeline failed: {}", e) };
                                     let rec = brain_common::SourcingEventRecord { id: uuid::Uuid::new_v4().to_string(), aggregate_id: record.aggregate_id.clone(), event: ev, created_at: chrono::Utc::now() };
                                     let _ = store.append_audit_event(&rec).await;
+                                    let _ = store.mark_event_processed(&record.id).await;
                                 }
                                 Err(e) => {
                                     tracing::error!(request_id = %request_id, error = %e, "Pipeline process timeout");
                                     let ev = brain_common::SourcingEvent::FallbackTriggered { reason: "Pipeline timeout (60s)".to_string() };
                                     let rec = brain_common::SourcingEventRecord { id: uuid::Uuid::new_v4().to_string(), aggregate_id: record.aggregate_id.clone(), event: ev, created_at: chrono::Utc::now() };
                                     let _ = store.append_audit_event(&rec).await;
+                                    let _ = store.mark_event_processed(&record.id).await;
                                 }
                             }
                         }
@@ -256,7 +251,6 @@ impl BrainEngine {
             if let Some(ref store) = self.raw_event_store {
                 match store.next_unprocessed_event("EmbeddingProcessRequested").await {
                     Ok(Some(record)) => {
-                        let _ = store.mark_event_processed(&record.id).await;
                         if let brain_common::SourcingEvent::EmbeddingProcessRequested { text } = record.event {
                             if let Some(ref embeddings) = self.embeddings {
                                 if let Ok(vector) = embeddings.embed(&text).await {
@@ -270,6 +264,7 @@ impl BrainEngine {
                                 }
                             }
                         }
+                        let _ = store.mark_event_processed(&record.id).await;
                     }
                     Ok(None) => tokio::time::sleep(std::time::Duration::from_millis(500)).await,
                     Err(e) => { tracing::error!("Worker error: {:?}", e); tokio::time::sleep(std::time::Duration::from_secs(1)).await; }
@@ -283,27 +278,26 @@ impl BrainEngine {
     async fn worker_storage(&self) {
         loop {
             if let Some(ref store) = self.raw_event_store {
-                // Here we can fetch FallbackTriggered or LlmProcessed
-                let mut processed_id = None;
+                // Fetch either LlmProcessed or FallbackTriggered event
+                let mut target_rec = None;
                 if let Ok(Some(rec)) = store.next_unprocessed_event("LlmProcessed").await { 
-                    let _ = store.mark_event_processed(&rec.id).await;
-                    processed_id = Some(rec.aggregate_id); 
-                }
-                else if let Ok(Some(rec)) = store.next_unprocessed_event("FallbackTriggered").await { 
-                    let _ = store.mark_event_processed(&rec.id).await;
-                    processed_id = Some(rec.aggregate_id); 
+                    target_rec = Some(rec);
+                } else if let Ok(Some(rec)) = store.next_unprocessed_event("FallbackTriggered").await { 
+                    target_rec = Some(rec);
                 }
                 
-                if let Some(agg_id) = processed_id {
+                if let Some(rec) = target_rec {
+                    let agg_id = rec.aggregate_id.clone();
                     if let Ok(Some(entry)) = self.rebuild(&agg_id).await {
                         // Store it
                         if let Ok(path) = self.vault.write_entry(&entry).await {
                             tracing::info!("Async EventStored: {}", path);
                             let ev = brain_common::SourcingEvent::EntryStored { path };
-                            let rec = brain_common::SourcingEventRecord { id: uuid::Uuid::new_v4().to_string(), aggregate_id: agg_id.clone(), event: ev, created_at: chrono::Utc::now() };
-                            let _ = store.append_audit_event(&rec).await;
+                            let rec_stored = brain_common::SourcingEventRecord { id: uuid::Uuid::new_v4().to_string(), aggregate_id: agg_id.clone(), event: ev, created_at: chrono::Utc::now() };
+                            let _ = store.append_audit_event(&rec_stored).await;
                         }
                     }
+                    let _ = store.mark_event_processed(&rec.id).await;
                 } else {
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
@@ -487,8 +481,47 @@ impl BrainEngine {
         }
     }
 
+    /// Удалить запись/сущность из всех уровней системы: SQLite, Vector Store, Entities и Markdown Vault.
+    pub async fn delete_record(&self, id_or_path: &str) -> Result<()> {
+        let id_clean = id_or_path
+            .trim_end_matches(".md")
+            .split('/')
+            .last()
+            .unwrap_or(id_or_path);
+
+        // 1. Удаление из RawEventStore / SQLite таблиц
+        if let Some(ref store) = self.raw_event_store {
+            let _ = store.delete_raw_event(id_or_path).await;
+            let _ = store.delete_raw_event(id_clean).await;
+            let _ = store.delete_projection(id_or_path).await;
+            let _ = store.delete_projection(id_clean).await;
+        }
+
+        // 2. Удаление из KnowledgeStore
+        if let Some(ref store) = self.knowledge_store {
+            let _ = store.delete_entity(id_or_path).await;
+            let _ = store.delete_entity(id_clean).await;
+        }
+
+        // 3. Удаление из Vector Store
+        if let Some(ref vs) = self.vector_store {
+            let _ = vs.delete(id_or_path).await;
+            let _ = vs.delete(id_clean).await;
+            let _ = vs.save().await;
+        }
+
+        // 4. Удаление из Obsidian Vault
+        let _ = self.vault.delete_entry(id_or_path).await;
+        if !id_or_path.ends_with(".md") {
+            let _ = self.vault.delete_entry(&format!("{}.md", id_or_path)).await;
+            let _ = self.vault.delete_entry(&format!("Entities/{}.md", id_clean)).await;
+        }
+
+        Ok(())
+    }
+
     pub async fn delete_entry(&self, file_path: &str) -> Result<()> {
-        self.vault.delete_entry(file_path).await
+        self.delete_record(file_path).await
     }
 
     pub async fn append_to_entry(&self, file_path: &str, text: &str) -> Result<()> {

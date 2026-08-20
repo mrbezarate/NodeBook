@@ -17,6 +17,6 @@ pub fn pearson_correlation(x: &[f32], y: &[f32]) -> f32 {
 /// Найти сильнейшие корреляции между метриками.
 pub fn find_strongest<'a>(pairs: &'a [(&'a str, &'a str, f32)]) -> Vec<(&'a str, &'a str, f32)> {
     let mut sorted: Vec<_> = pairs.iter().map(|&(a, b, c)| (a, b, c.abs())).collect();
-    sorted.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
+    sorted.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
     sorted.into_iter().take(5).collect()
 }
